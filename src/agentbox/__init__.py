@@ -2,6 +2,8 @@
 
 from agentbox.agent.agent import Agent
 from agentbox.config import AgentConfig, ModelConfig, RolloutConfig, SandboxConfig
+from agentbox.metrics import AggregateMetrics, aggregate_trajectories
+from agentbox.runner.parallel import ParallelResult, ParallelRunner
 from agentbox.runner.rollout import Rollout
 from agentbox.sandbox.manager import SandboxManager
 from agentbox.tasks.schema import Task, VerifierSpec
@@ -14,8 +16,11 @@ __all__ = [
     "__version__",
     "Agent",
     "AgentConfig",
+    "AggregateMetrics",
     "BaseTool",
     "ModelConfig",
+    "ParallelResult",
+    "ParallelRunner",
     "Rollout",
     "RolloutConfig",
     "SandboxConfig",
@@ -23,5 +28,6 @@ __all__ = [
     "Task",
     "Trajectory",
     "VerifierSpec",
+    "aggregate_trajectories",
     "tool",
 ]
