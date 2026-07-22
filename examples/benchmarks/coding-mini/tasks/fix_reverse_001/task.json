@@ -1,0 +1,29 @@
+{
+  "task_id": "fix_reverse_001",
+  "description": "The function reverse_string in reverse.py is broken. Fix it so all tests pass. It should return the input string reversed.",
+  "starter_files": {},
+  "setup_commands": [
+    "pip install -q pytest"
+  ],
+  "verifier": {
+    "type": "pytest",
+    "command": "python -m pytest -q",
+    "path": null,
+    "success_exit_code": 0,
+    "timeout_s": 30.0,
+    "reward_success": 1.0,
+    "reward_failure": 0.0,
+    "parse_stdout": false
+  },
+  "metadata": {
+    "difficulty": "easy",
+    "tags": [
+      "python",
+      "strings"
+    ],
+    "language": "python"
+  },
+  "system_prompt_extra": null,
+  "allowed_tools": null,
+  "max_steps": null
+}

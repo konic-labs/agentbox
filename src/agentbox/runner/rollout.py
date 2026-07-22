@@ -83,6 +83,7 @@ class Rollout:
         sandbox: SandboxConfig | None = None,
         config: RolloutConfig | None = None,
         manager: SandboxManager | None = None,
+        setup_checks: list[Any] | None = None,
     ) -> Trajectory:
         run_id = (
             (config.run_id if config else None)
@@ -131,7 +132,24 @@ class Rollout:
                     reward=0.0,
                     final_status=FinalStatus.ERROR,
                     error=seed.error or "task seed failed",
+                    metadata={"failure_kind": "seed"},
                 )
+
+            if setup_checks:
+                from agentbox.benchmark.setup_check import SetupChecker
+
+                check = await SetupChecker(mgr).run(sandbox_handle, setup_checks)
+                if not check.ok:
+                    recorder.set_messages([])
+                    return recorder.finalize(
+                        reward=0.0,
+                        final_status=FinalStatus.ERROR,
+                        error=check.error or "setup check failed",
+                        metadata={
+                            "failure_kind": "setup_check",
+                            "failed_check": check.failed_check,
+                        },
+                    )
 
             system = render_system_prompt(
                 workspace_dir=sandbox_cfg.workspace_dir,

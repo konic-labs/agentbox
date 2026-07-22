@@ -1,0 +1,69 @@
+{
+  "schema_version": "1",
+  "suite_id": "agentbox-coding-mini",
+  "name": "Coding Mini",
+  "description": "Small real-rollout coding benchmark using the same Docker env as training collection.",
+  "version": "1.0.0",
+  "tasks_path": "tasks",
+  "sandbox": {
+    "image": "python:3.12-slim-bookworm",
+    "workspace_dir": "/workspace",
+    "working_dir": "/workspace",
+    "env": {},
+    "limits": {
+      "cpu_count": 1.0,
+      "memory_mb": 512,
+      "pids_limit": 256,
+      "network_disabled": false,
+      "memswap_mb": null
+    },
+    "auto_pull": true,
+    "auto_remove": true,
+    "keep_on_failure": false,
+    "labels": {},
+    "command": [
+      "sleep",
+      "infinity"
+    ],
+    "ensure_pytest": true
+  },
+  "agent": {
+    "tools": "structured",
+    "custom_tools": [],
+    "builtins": true,
+    "system_prompt": null,
+    "max_steps": 30,
+    "step_timeout_s": 120.0,
+    "episode_timeout_s": 900.0,
+    "parallel_tool_calls": true,
+    "drop_tools": [],
+    "drop_tools_prob": 0.0,
+    "include_thinking": true,
+    "step_penalty": 0.0,
+    "timeout_penalty": 0.0,
+    "max_steps_penalty": 0.0
+  },
+  "n_per_task": 1,
+  "concurrency": 4,
+  "seed": 42,
+  "scoring": {
+    "primary": "verifier",
+    "require_seed_ok": true,
+    "setup_checks": [
+      {
+        "name": "python_ok",
+        "command": "python -c 'import sys; print(sys.version)'",
+        "success_exit_code": 0,
+        "timeout_s": 60.0,
+        "required": true
+      }
+    ],
+    "track_steps": true,
+    "track_duration": true,
+    "enable_ruler": false,
+    "ruler_group_size": 4
+  },
+  "content_hash": "e5fd126c08f924d17f09e471b09425fc426aa4ca754c080e63d63b02a74d5cd5",
+  "created_at": "2026-07-22T04:39:44.611290Z",
+  "metadata": {}
+}

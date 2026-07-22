@@ -52,6 +52,7 @@ Control plane (prompts, models, trajectories) stays on the host. Execution plane
 | [Metrics](metrics.md) | Aggregate success rate, steps, per-task stats |
 | [CLI](cli.md) | Typer commands, flags, exit codes |
 | [Security](security.md) | Isolation model, network, path jail, residual risk |
+| [Benchmarks](benchmarks.md) | Frozen real-rollout suites, multi-model reports, setup checks |
 | [Development](development.md) | Tests, packaging, extension checklist |
 
 ## Core guarantees

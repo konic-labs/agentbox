@@ -1,6 +1,16 @@
 """AgentBox — local agentic virtual environment for trajectory building."""
 
 from agentbox.agent.agent import Agent
+from agentbox.benchmark import (
+    BenchmarkReport,
+    BenchmarkRunConfig,
+    BenchmarkRunner,
+    BenchmarkSuite,
+    ModelUnderTest,
+    compare_reports,
+    create_suite_from_tasks,
+    load_suite,
+)
 from agentbox.config import AgentConfig, ModelConfig, RolloutConfig, SandboxConfig
 from agentbox.metrics import AggregateMetrics, aggregate_trajectories
 from agentbox.runner.parallel import ParallelResult, ParallelRunner
@@ -18,7 +28,12 @@ __all__ = [
     "AgentConfig",
     "AggregateMetrics",
     "BaseTool",
+    "BenchmarkReport",
+    "BenchmarkRunConfig",
+    "BenchmarkRunner",
+    "BenchmarkSuite",
     "ModelConfig",
+    "ModelUnderTest",
     "ParallelResult",
     "ParallelRunner",
     "Rollout",
@@ -29,5 +44,9 @@ __all__ = [
     "Trajectory",
     "VerifierSpec",
     "aggregate_trajectories",
+    "compare_reports",
+    "create_suite_from_tasks",
+    "load_suite",
     "tool",
 ]
+

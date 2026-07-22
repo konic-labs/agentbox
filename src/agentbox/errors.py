@@ -53,3 +53,11 @@ class RolloutTimeoutError(AgentBoxError):
 
 class TaskGenerationError(AgentBoxError):
     """Automated task generation failed after retries."""
+
+
+class BenchmarkError(AgentBoxError):
+    """Benchmark suite or run failed."""
+
+
+class SuiteIntegrityError(BenchmarkError):
+    """Suite content hash does not match frozen snapshot."""

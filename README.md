@@ -11,6 +11,7 @@
 [Tasks](#tasks) ·
 [Trajectories](#trajectories--art) ·
 [CLI](#cli-reference) ·
+[Benchmarks](#benchmarks) ·
 [Docs](#technical-docs) ·
 [Development](#development) ·
 [License](#license)
@@ -39,7 +40,8 @@ OpenPipe ART, TRL, Unsloth, verl, or your own stack.
 - **Objective rewards** — pytest / command verifiers (+ optional step shaping)
 - **ParallelRunner** — concurrent rollouts and GRPO-style groups
 - **Trajectory export** — JSON, JSONL, ART-compatible dicts
-- **Typer CLI** — `doctor`, `run`, `run-dir`, `export`, `build-image`, `prune`
+- **Typer CLI** — `doctor`, `run`, `run-dir`, `bench`, `export`, `build-image`, `prune`
+- **Real-rollout benchmarks** — freeze tasks + env; score any OpenAI-compatible model
 - **Task generation** — frontier model + optional DSPy + live Docker QC
 
 ## Quick Start
@@ -251,11 +253,34 @@ agentbox doctor [--prune]
 agentbox build-image [--tag agentbox/sandbox:latest]
 agentbox run TASK.json -m MODEL --base-url URL [--network] [--out trajectories/]
 agentbox run-dir tasks/ -m MODEL --base-url URL -c 16 --n 4
+agentbox bench create DIR --from-tasks tasks/ --suite-id ID --name NAME
+agentbox bench freeze DIR && agentbox bench validate DIR --strict
+agentbox bench run DIR -m MODEL --base-url URL --model-id LABEL -o bench-results/run1
+agentbox bench show bench-results/run1/report.json
 agentbox export traj.json --format art -o out.json
 agentbox prune
 ```
 
-Full flag list: [docs/cli.md](docs/cli.md).
+Full flag list: [docs/cli.md](docs/cli.md) · [docs/benchmarks.md](docs/benchmarks.md).
+
+## Benchmarks
+
+Same Docker rollouts as training collection, frozen as a suite, scored against
+any OpenAI-compatible endpoint (local or external).
+
+```bash
+python examples/bench_run.py   # hermetic mock solver (Docker required)
+
+agentbox bench run examples/benchmarks/coding-mini \
+  --model-id ollama-qwen \
+  --model qwen2.5-coder:7b \
+  --base-url http://localhost:11434/v1 \
+  --api-key ollama \
+  --out bench-results/run1
+```
+
+Setup checks run after seed (env health); task verifiers own success/reward.
+Details: [docs/benchmarks.md](docs/benchmarks.md).
 
 ## Sandbox image
 
@@ -285,6 +310,7 @@ Override: `SandboxConfig(image="my-org/env:1.2")` or presets in
 | [docs/trajectories.md](docs/trajectories.md) | Formats & ART export |
 | [docs/runner.md](docs/runner.md) | Rollout & parallel |
 | [docs/cli.md](docs/cli.md) | CLI reference |
+| [docs/benchmarks.md](docs/benchmarks.md) | Real-rollout multi-model suites |
 | [docs/security.md](docs/security.md) | Isolation model |
 | [docs/development.md](docs/development.md) | Tests & extension |
 

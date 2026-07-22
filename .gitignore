@@ -48,3 +48,4 @@ out/
 
 # Docker
 .docker-cache/
+bench-results/

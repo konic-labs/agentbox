@@ -1,0 +1,28 @@
+{
+  "task_id": "fix_fizzbuzz_001",
+  "description": "The function fizzbuzz in fizzbuzz.py is broken. Fix it so all tests pass. Fizzbuzz should return 'Fizz' for multiples of 3, 'Buzz' for multiples of 5, 'FizzBuzz' for multiples of both, and the number as a string otherwise.",
+  "starter_files": {},
+  "setup_commands": [],
+  "verifier": {
+    "type": "pytest",
+    "command": "python -m pytest -q",
+    "path": null,
+    "success_exit_code": 0,
+    "timeout_s": 30.0,
+    "reward_success": 1.0,
+    "reward_failure": 0.0,
+    "parse_stdout": false
+  },
+  "metadata": {
+    "difficulty": "easy",
+    "tags": [
+      "python",
+      "algorithms"
+    ],
+    "estimated_steps": 10,
+    "language": "python"
+  },
+  "system_prompt_extra": null,
+  "allowed_tools": null,
+  "max_steps": null
+}

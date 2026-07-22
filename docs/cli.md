@@ -98,6 +98,21 @@ agentbox prune
 
 Remove all containers labeled `agentbox=1`.
 
+### `bench` (subcommand group)
+
+Real-rollout benchmark suites. See [benchmarks.md](benchmarks.md).
+
+```bash
+agentbox bench create DIR --from-tasks tasks/ --suite-id ID --name NAME [--network]
+agentbox bench freeze DIR
+agentbox bench validate DIR [--strict]
+agentbox bench run DIR --model-id LABEL -m MODEL --base-url URL [-o OUT]
+agentbox bench run DIR --models-file models.yaml -o OUT
+agentbox bench run DIR --mock -o OUT          # hermetic pipeline smoke
+agentbox bench show OUT/report.json
+agentbox bench compare a/report.json b/report.json
+```
+
 ## Environment
 
 | Variable | Effect |

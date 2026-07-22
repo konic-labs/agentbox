@@ -65,6 +65,7 @@ class ParallelRunner:
         n_per_task: int = 1,
         progress: bool = True,
         on_trajectory: Callable[[Trajectory], Any] | None = None,
+        setup_checks: Sequence[Any] | None = None,
     ) -> list[Trajectory]:
         """Expand tasks × n_per_task into jobs and run with a semaphore."""
         if n_per_task < 1:
@@ -74,7 +75,12 @@ class ParallelRunner:
             for _ in range(n_per_task):
                 jobs.append(task)
 
-        result = await self._run_jobs(jobs, progress=progress, on_trajectory=on_trajectory)
+        result = await self._run_jobs(
+            jobs,
+            progress=progress,
+            on_trajectory=on_trajectory,
+            setup_checks=list(setup_checks) if setup_checks else None,
+        )
         return result.trajectories
 
     async def run_groups(
@@ -105,6 +111,7 @@ class ParallelRunner:
         *,
         progress: bool,
         on_trajectory: Callable[[Trajectory], Any] | None,
+        setup_checks: list[Any] | None = None,
     ) -> ParallelResult:
         sem = asyncio.Semaphore(self.concurrency)
         results: list[Trajectory | None] = [None] * len(jobs)
@@ -140,6 +147,7 @@ class ParallelRunner:
                         sandbox=self.sandbox,
                         config=self.config,
                         manager=None,  # isolate managers per job for thread-safety
+                        setup_checks=setup_checks,
                     )
                 except Exception as exc:
                     logger.exception("parallel job failed task_id=%s", task.task_id)
