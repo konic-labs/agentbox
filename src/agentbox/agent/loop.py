@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from collections.abc import Awaitable, Callable
@@ -74,11 +75,26 @@ class AgentLoop:
                     )
 
                 openai_messages = [m.to_openai_dict() for m in messages]
-                response = await self.model.complete(
-                    openai_messages,
-                    tools=schemas or None,
-                    tool_choice="auto",
-                )
+                try:
+                    response = await asyncio.wait_for(
+                        self.model.complete(
+                            openai_messages,
+                            tools=schemas or None,
+                            tool_choice="auto",
+                        ),
+                        timeout=self.config.step_timeout_s,
+                    )
+                except TimeoutError:
+                    return AgentLoopResult(
+                        messages=messages,
+                        tool_call_records=tool_records,
+                        final_status=FinalStatus.TIMEOUT,
+                        steps=step,
+                        model_calls=model_calls,
+                        stop_reason="timeout",
+                        error=f"step timed out after {self.config.step_timeout_s}s",
+                        usage_totals=usage_totals,
+                    )
                 model_calls += 1
                 self._accumulate_usage(usage_totals, response)
 
@@ -102,11 +118,26 @@ class AgentLoop:
                     )
 
                 ctx.step = step
-                tool_messages = await self.tools.execute_many(
-                    response.tool_calls,
-                    ctx,
-                    parallel=self.config.parallel_tool_calls,
-                )
+                try:
+                    tool_messages = await asyncio.wait_for(
+                        self.tools.execute_many(
+                            response.tool_calls,
+                            ctx,
+                            parallel=self.config.parallel_tool_calls,
+                        ),
+                        timeout=self.config.step_timeout_s,
+                    )
+                except TimeoutError:
+                    return AgentLoopResult(
+                        messages=messages,
+                        tool_call_records=tool_records,
+                        final_status=FinalStatus.TIMEOUT,
+                        steps=step,
+                        model_calls=model_calls,
+                        stop_reason="timeout",
+                        error=f"tool batch timed out after {self.config.step_timeout_s}s",
+                        usage_totals=usage_totals,
+                    )
                 for tc, tm in zip(response.tool_calls, tool_messages, strict=True):
                     try:
                         args = json.loads(tc.function.arguments or "{}")

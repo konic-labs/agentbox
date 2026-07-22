@@ -14,6 +14,7 @@ from agentbox.config import AgentConfig, ModelConfig, RolloutConfig, SandboxConf
 from agentbox.model.base import ModelClient
 from agentbox.model.openai_compat import OpenAICompatClient
 from agentbox.sandbox.manager import SandboxManager
+from agentbox.tasks.rewards import shaped_reward
 from agentbox.tasks.schema import Task
 from agentbox.tasks.seeder import TaskSeeder
 from agentbox.tasks.verifier import Verifier
@@ -23,6 +24,7 @@ from agentbox.tools.registry import build_tool_registry
 from agentbox.trajectory.recorder import TrajectoryRecorder
 from agentbox.trajectory.schema import Trajectory
 from agentbox.types import FinalStatus, ToolMode
+import random
 
 logger = logging.getLogger("agentbox.rollout")
 
@@ -93,12 +95,14 @@ class Rollout:
         mgr = manager or SandboxManager(sandbox_cfg)
 
         tool_mode = agent_cfg.tools
+        rng = random.Random(config.seed if config else None)
         registry = build_tool_registry(
             tool_mode,
             custom_tools=agent_cfg.custom_tools,
             include_builtins=agent_cfg.builtins,
             drop=agent_cfg.drop_tools,
             drop_prob=agent_cfg.drop_tools_prob,
+            rng=rng,
         )
         executor = ToolExecutor(registry)
         tool_schemas = executor.schemas()
@@ -172,7 +176,15 @@ class Rollout:
             )
             recorder.set_metrics(verify_s=time.monotonic() - t1)
 
-            reward = verify_result.reward
+            reward = shaped_reward(
+                verify_result,
+                steps=loop_result.steps,
+                step_penalty=agent_cfg.step_penalty,
+                timeout=loop_result.stop_reason == "timeout",
+                timeout_penalty=agent_cfg.timeout_penalty,
+                max_steps_hit=loop_result.stop_reason == "max_steps",
+                max_steps_penalty=agent_cfg.max_steps_penalty,
+            )
             if verify_result.success:
                 final_status = FinalStatus.SUCCESS
             elif loop_result.stop_reason == "timeout":
@@ -192,6 +204,7 @@ class Rollout:
                     "verify_exit_code": verify_result.exit_code,
                     "verify_command": verify_result.command,
                     "stop_reason": loop_result.stop_reason,
+                    "tools_available": registry.names(),
                 },
             )
             traj.metrics.duration_s = time.monotonic() - t_start

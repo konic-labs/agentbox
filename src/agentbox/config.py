@@ -66,6 +66,10 @@ class AgentConfig(BaseModel):
     drop_tools: list[str] = Field(default_factory=list)
     drop_tools_prob: float = 0.0
     include_thinking: bool = True
+    # Optional process reward shaping applied after verifier
+    step_penalty: float = 0.0
+    timeout_penalty: float = 0.0
+    max_steps_penalty: float = 0.0
 
 
 class RolloutConfig(BaseModel):
