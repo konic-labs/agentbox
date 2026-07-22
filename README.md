@@ -2,7 +2,7 @@
 
 # AgentBox
 
-**Local agentic virtual environments for trajectory building.**
+**ART-native rollout engine for real agentic trajectories in Docker sandboxes.**
 
 [Quick Start](#quick-start) ·
 [Workflow](#workflow) ·
@@ -18,28 +18,32 @@
 
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![Runtime](https://img.shields.io/badge/Runtime-Docker%20%7C%20AsyncIO-black)
+![ART](https://img.shields.io/badge/ART-native-orange)
 ![Package](https://img.shields.io/badge/Package-agentbox-green)
 ![License](https://img.shields.io/badge/License-Apache%202.0-green)
 
 </div>
 
-AgentBox runs LLM agents inside **isolated Docker sandboxes**, gives them
-structured tools (or pure shell), verifies outcomes, and records multi-turn
-**trajectories** for offline datasets and online RL (ART / GRPO-style training).
+AgentBox is an **ART-native** environment + rollout harness: isolated Docker
+sandboxes, structured tools (or pure shell), task seeding, verifiers, and
+multi-turn trajectories shaped for [OpenPipe ART](https://github.com/OpenPipe/ART)
+(`messages_and_choices`, rewards, groups) — for online GRPO with ART’s inference
+backend, offline SFT dumps, and the same real-rollout path for benchmarks.
 
-It is the **environment + rollout harness** — not a trainer. Pair exports with
-OpenPipe ART, TRL, Unsloth, verl, or your own stack.
+It is **not** a trainer. ART (or TRL / Unsloth / verl) owns training; AgentBox
+owns the virtual env and trajectory collection.
 
 ## Highlights
 
+- **ART-native trajectories** — `to_art_dict()` / `to_art()`; GRPO groups via `ParallelRunner`
 - **One container per rollout** — clean state, parallel isolation, labeled GC
-- **OpenAI tools protocol** — Chat Completions + tool calling only (v1)
-- **Provider-agnostic models** — Featherless, OpenRouter, vLLM, Ollama, …
+- **OpenAI tools protocol** — Chat Completions + tool calling (ART-compatible wire format)
+- **Provider-agnostic models** — Featherless, OpenRouter, vLLM, Ollama, ART backend client, …
 - **Builtins + custom tools** — `BaseTool` / `@tool`, override-by-name
 - **Task seeding** — `starter_files` + `setup_commands` before the agent starts
-- **Objective rewards** — pytest / command verifiers (+ optional step shaping)
+- **Objective rewards** — pytest / command verifiers (hybrid-ready with ART RULER)
 - **ParallelRunner** — concurrent rollouts and GRPO-style groups
-- **Trajectory export** — JSON, JSONL, ART-compatible dicts
+- **Trajectory export** — JSON, JSONL, ART-native dicts
 - **Typer CLI** — `doctor`, `run`, `run-dir`, `bench`, `export`, `build-image`, `prune`
 - **Real-rollout benchmarks** — freeze tasks + env; score any OpenAI-compatible model
 - **Task generation** — frontier model + optional DSPy + live Docker QC
@@ -234,11 +238,19 @@ task = await gen.generate(difficulty="easy", domain="python")
 
 ## Trajectories & ART
 
+AgentBox is built to drop into ART workflows:
+
+| Flow | AgentBox role | ART role |
+| --- | --- | --- |
+| **Online GRPO** | Docker env, tools, tasks, optional verifier | Inference (vLLM/LoRA) + `backend.train` |
+| **Offline SFT** | Bulk rollouts from any API | SFT on exported trajectories |
+| **Rewards** | Verifier scores | Optional RULER on groups (hybrid OK) |
+
 ```python
 traj.save("trajectories/run.json")
-art = traj.to_art_dict()   # messages_and_choices, reward, metrics, metadata
+art = traj.to_art_dict()   # ART-native: messages_and_choices, reward, metrics, metadata
 # uv pip install -e ".[art]"
-# live = traj.to_art()
+# live = traj.to_art()     # openpipe-art Trajectory object
 ```
 
 ```bash
