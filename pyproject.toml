@@ -1,0 +1,84 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentbox"
+version = "0.1.0"
+description = "Fully local agentic virtual environment for trajectory building"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+authors = [{ name = "AgentBox Contributors" }]
+keywords = ["agents", "llm", "docker", "rl", "trajectory", "sandbox"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "docker>=7.0",
+    "pydantic>=2.6",
+    "openai>=1.40",
+    "httpx>=0.27",
+    "typer>=0.12",
+    "anyio>=4.0",
+    "structlog>=24.0",
+]
+
+[project.optional-dependencies]
+rich = ["rich>=13"]
+art = ["openpipe-art>=0.4"]
+generate = ["dspy>=2.5"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-timeout>=2.3",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[project.scripts]
+agentbox = "agentbox.cli.main:app"
+
+[project.urls]
+Homepage = "https://github.com/agentbox/agentbox"
+Documentation = "https://github.com/agentbox/agentbox#readme"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentbox"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/examples",
+    "/docker",
+    "/README.md",
+    "/LICENSE",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = [
+    "docker: tests that require a running Docker daemon",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["agentbox"]
