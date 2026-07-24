@@ -1,4 +1,4 @@
-"""Validate generated tasks: schema + optional live Docker QC."""
+"""Validate generated tasks: schema + live Docker QC (+ helpers for LLM judge)."""
 
 from __future__ import annotations
 
@@ -27,6 +27,11 @@ class ValidationReport(BaseModel):
     seed_ok: bool | None = None
     verifier_runs: bool | None = None
     verifier_fails_on_starter: bool | None = None
+    # LLM judge (optional second API call; same teacher endpoint)
+    llm_ok: bool | None = None
+    llm_score: float | None = None
+    llm_accept: bool | None = None
+    llm_reasons: str | None = None
     details: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -44,7 +49,15 @@ def parse_task_from_prediction(
     starter_files = json.loads(starter_files_json)
     if not isinstance(starter_files, dict):
         raise ValueError("starter_files_json must be a JSON object")
-    starter_files = {str(k): str(v) for k, v in starter_files.items()}
+    # Models sometimes leak schema keys into starter_files
+    _junk = {"setup_commands", "verifier", "metadata", "task_id", "description"}
+    starter_files = {
+        str(k): str(v)
+        for k, v in starter_files.items()
+        if str(k) not in _junk and not str(k).startswith("__")
+    }
+    if not starter_files:
+        raise ValueError("starter_files empty after filtering junk keys")
 
     setup_commands = json.loads(setup_commands_json or "[]")
     if not isinstance(setup_commands, list):
@@ -135,3 +148,20 @@ async def validate_task_live(
     finally:
         if sandbox is not None:
             await manager.destroy(sandbox)
+
+
+def task_payload_for_judge(task: Task, *, max_file_chars: int = 6000) -> dict[str, str]:
+    """Serialize a Task into compact JSON strings for the LLM judge."""
+    files: dict[str, str] = {}
+    for path, content in (task.starter_files or {}).items():
+        text = str(content)
+        if len(text) > max_file_chars:
+            text = text[:max_file_chars] + "\n...[truncated]..."
+        files[str(path)] = text
+    return {
+        "task_id": task.task_id,
+        "description": task.description,
+        "starter_files_json": json.dumps(files, ensure_ascii=False),
+        "setup_commands_json": json.dumps(list(task.setup_commands or [])),
+        "verifier_json": json.dumps(task.verifier.model_dump(mode="json")),
+    }

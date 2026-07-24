@@ -94,7 +94,8 @@ ParallelRunner(concurrency=N)
 TaskGenerator.generate(difficulty, domain, constraints)
   -> DSPy module OR OpenAI JSON completion
   -> parse_task_from_prediction -> Task (Pydantic)
-  -> optional validate_task_live:
+  -> optional validate_task_live (Docker)
+  -> optional validate_task_llm (DSPy structured judge, same teacher endpoint):
        create sandbox -> seed -> verifier smoke
        expect starter to FAIL verifier
   -> return Task | retry up to max_retries

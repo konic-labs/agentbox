@@ -1,4 +1,8 @@
-"""Automated task generation via frontier models (+ optional DSPy)."""
+"""Automated task generation via teacher models (+ optional DSPy).
+
+Supports self-hosted OpenAI-compatible endpoints (vLLM / TGI / etc.) for both
+generation and LLM task validation (same model by default).
+"""
 
 from __future__ import annotations
 
@@ -12,7 +16,11 @@ from pydantic import BaseModel, Field
 
 from agentbox.config import ModelConfig, SandboxConfig
 from agentbox.errors import TaskGenerationError
-from agentbox.tasks.generate.lm import build_openai_client, configure_dspy_lm
+from agentbox.tasks.generate.llm_validate import (
+    merge_validation_reports,
+    validate_task_llm,
+)
+from agentbox.tasks.generate.lm import build_dspy_lm, build_openai_client, configure_dspy_lm
 from agentbox.tasks.generate.validate import (
     ValidationReport,
     parse_task_from_prediction,
@@ -33,6 +41,13 @@ class GenerateConfig(BaseModel):
     max_tokens: int | None = 8192
     timeout_s: float = 180.0
     validate_in_docker: bool = True
+    # Second API call: DSPy structured judge (same teacher by default)
+    validate_with_llm: bool = True
+    llm_judge_min_score: float = 0.65
+    # Optional override for judge model (defaults to generation model/endpoint)
+    validator_model: str | None = None
+    validator_base_url: str | None = None
+    validator_api_key: str | None = None
     sandbox: SandboxConfig = Field(
         default_factory=lambda: SandboxConfig(
             limits=SandboxConfig().limits.model_copy(
@@ -44,13 +59,38 @@ class GenerateConfig(BaseModel):
     max_retries: int = 2
     use_dspy: bool = True
     expect_fail_on_starter: bool = True
+    # Extra OpenAI-compatible body fields
+    extra_body: dict[str, Any] = Field(default_factory=dict)
+    # Auto-disable deep-thinking for structured gen/judge when possible
+    disable_thinking: bool = True
+
+
+def _default_thinking_extra(model: str, disable_thinking: bool) -> dict[str, Any]:
+    """Disable deep-thinking for structured generation (faster, non-empty text)."""
+    if not disable_thinking:
+        return {}
+    mid = model.lower()
+    if "glm" in mid or "zai-org" in mid:
+        return {
+            "thinking": {"type": "disabled"},
+            "enable_thinking": False,
+        }
+    if "qwen" in mid:
+        return {
+            "enable_thinking": False,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+    return {}
 
 
 class TaskGenerator:
-    """Generate complete Task definitions using a frontier model."""
+    """Generate complete Task definitions using a teacher model."""
 
     def __init__(self, config: GenerateConfig) -> None:
         self.config = config
+        extra = dict(config.extra_body or {})
+        for k, v in _default_thinking_extra(config.model, config.disable_thinking).items():
+            extra.setdefault(k, v)
         self.model_config = ModelConfig(
             model=config.model,
             base_url=config.base_url,
@@ -58,17 +98,43 @@ class TaskGenerator:
             temperature=config.temperature,
             max_tokens=config.max_tokens,
             timeout_s=config.timeout_s,
+            extra_body=extra,
+        )
+        # Judge uses same endpoint/model unless explicitly overridden
+        v_model = config.validator_model or config.model
+        v_extra = dict(config.extra_body or {})
+        for k, v in _default_thinking_extra(v_model, config.disable_thinking).items():
+            v_extra.setdefault(k, v)
+        self.validator_model_config = ModelConfig(
+            model=v_model,
+            base_url=config.validator_base_url or config.base_url,
+            api_key=config.validator_api_key or config.api_key,
+            temperature=min(config.temperature, 0.3),
+            # Same completion budget as generator (e.g. 8192 on this vLLM box)
+            max_tokens=config.max_tokens or 8192,
+            timeout_s=config.timeout_s,
+            extra_body=v_extra,
         )
         self._dspy_module: Any | None = None
+        self._dspy_lm: Any | None = None
+        self._dspy_validator_lm: Any | None = None
         if config.use_dspy:
             try:
                 from agentbox.tasks.generate.signatures import get_generator_module
 
-                configure_dspy_lm(self.model_config)
+                # Build LMs once; concurrent calls use dspy.context(lm=...) — not re-configure
+                self._dspy_lm = build_dspy_lm(self.model_config)
+                self._dspy_validator_lm = build_dspy_lm(self.validator_model_config)
+                try:
+                    configure_dspy_lm(self.model_config, set_global=True)
+                except Exception:
+                    pass
                 self._dspy_module = get_generator_module()()
             except Exception as exc:
                 logger.warning("DSPy unavailable (%s); falling back to OpenAI JSON", exc)
                 self._dspy_module = None
+                self._dspy_lm = None
+                self._dspy_validator_lm = None
 
     async def generate(
         self,
@@ -90,18 +156,17 @@ class TaskGenerator:
                     meta_tags = list(task.metadata.get("tags") or [])
                     task.metadata["tags"] = sorted(set(meta_tags + tags))
 
-                if self.config.validate_in_docker:
-                    report = await validate_task_live(
-                        task,
-                        sandbox_config=self.config.sandbox,
-                        expect_fail_on_starter=self.config.expect_fail_on_starter,
+                report = await self.validate_task(task, domain=domain)
+                if not report.ok:
+                    last_error = "; ".join(report.errors) or "validation failed"
+                    logger.warning(
+                        "generate attempt %d failed QC: %s", attempt + 1, last_error
                     )
-                    if not report.ok:
-                        last_error = "; ".join(report.errors) or "validation failed"
-                        logger.warning(
-                            "generate attempt %d failed QC: %s", attempt + 1, last_error
-                        )
-                        continue
+                    continue
+                # attach judge metadata for provenance
+                if report.llm_score is not None:
+                    task.metadata["llm_judge_score"] = report.llm_score
+                    task.metadata["llm_judge_accept"] = report.llm_accept
                 return task
             except Exception as exc:
                 last_error = str(exc)
@@ -129,11 +194,57 @@ class TaskGenerator:
                 logger.error("generate_many item %d failed: %s", i, exc)
         return tasks
 
-    async def validate_task(self, task: Task) -> ValidationReport:
-        return await validate_task_live(
+    async def validate_task(
+        self,
+        task: Task,
+        *,
+        domain: str = "python",
+    ) -> ValidationReport:
+        """Run configured QC stages: Docker fail-on-starter and/or LLM judge."""
+        reports: list[ValidationReport] = []
+
+        if self.config.validate_in_docker:
+            docker_report = await validate_task_live(
+                task,
+                sandbox_config=self.config.sandbox,
+                expect_fail_on_starter=self.config.expect_fail_on_starter,
+            )
+            reports.append(docker_report)
+            if not docker_report.ok:
+                return docker_report
+
+        if self.config.validate_with_llm:
+            llm_report = await validate_task_llm(
+                task,
+                model_config=self.validator_model_config,
+                min_score=self.config.llm_judge_min_score,
+                use_dspy=self.config.use_dspy,
+                domain=domain,
+                dspy_lm=self._dspy_validator_lm or self._dspy_lm,
+            )
+            reports.append(llm_report)
+
+        if not reports:
+            return ValidationReport(ok=True, task=task, warnings=["no QC stages enabled"])
+
+        if len(reports) == 1:
+            return reports[0]
+        return merge_validation_reports(*reports, task=task)
+
+    async def validate_task_llm_only(
+        self,
+        task: Task,
+        *,
+        domain: str = "python",
+    ) -> ValidationReport:
+        """LLM judge only (skip Docker). Useful for batch re-audit of existing tasks."""
+        return await validate_task_llm(
             task,
-            sandbox_config=self.config.sandbox,
-            expect_fail_on_starter=self.config.expect_fail_on_starter,
+            model_config=self.validator_model_config,
+            min_score=self.config.llm_judge_min_score,
+            use_dspy=self.config.use_dspy,
+            domain=domain,
+            dspy_lm=self._dspy_validator_lm or self._dspy_lm,
         )
 
     async def _generate_once(
@@ -152,12 +263,26 @@ class TaskGenerator:
     ) -> Task:
         import asyncio
 
-        pred = await asyncio.to_thread(
-            self._dspy_module,
-            difficulty=difficulty,
-            domain=domain,
-            constraints=constraints,
-        )
+        import dspy
+
+        module = self._dspy_module
+        lm = self._dspy_lm
+
+        def _run() -> Any:
+            if lm is not None:
+                with dspy.context(lm=lm):
+                    return module(
+                        difficulty=difficulty,
+                        domain=domain,
+                        constraints=constraints,
+                    )
+            return module(
+                difficulty=difficulty,
+                domain=domain,
+                constraints=constraints,
+            )
+
+        pred = await asyncio.to_thread(_run)
         return parse_task_from_prediction(
             task_id=pred.task_id,
             description=pred.description,
@@ -174,37 +299,73 @@ class TaskGenerator:
         client = build_openai_client(self.model_config)
         system = (
             "You generate self-contained coding tasks for agents in Docker. "
-            "Reply with a single JSON object only (no markdown) with keys: "
-            "task_id, description, starter_files (object path->content), "
-            "setup_commands (list of strings), verifier (object with type/command/"
-            "success_exit_code), metadata (difficulty, tags, estimated_steps, language). "
-            "Starter code must FAIL the verifier; a correct fix should pass."
+            "Reply with ONE valid JSON object only (no markdown fences, no prose). "
+            "Keys: task_id (string), description (string), "
+            "starter_files (object mapping path string -> file content string), "
+            "setup_commands (array of strings), "
+            "verifier (object with type/command/success_exit_code), "
+            "metadata (object with difficulty, tags, estimated_steps, language). "
+            "JSON rules: escape all newlines in strings as \\n, escape quotes as \\\", "
+            "no trailing commas, no raw control characters inside strings. "
+            "CRITICAL: starter_files must be stubs (signatures + raise NotImplementedError). "
+            "Do NOT ship near-complete solutions or # BUG spoilers. "
+            "Description states API/behavior only. Prefer Python + pytest. "
+            "Starter must FAIL tests; a correct implementation must pass."
         )
         user = (
             f"difficulty={difficulty}\n"
             f"domain={domain}\n"
             f"constraints={constraints or 'none'}\n"
-            "Prefer Python + pytest. Include complete file contents."
+            "Return valid JSON only. Starter = stubs, not almost-solutions."
         )
-        resp = await client.chat.completions.create(
-            model=self.model_config.model,
-            messages=[
+        create_kwargs: dict[str, Any] = {
+            "model": self.model_config.model,
+            "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            temperature=self.model_config.temperature,
-            max_tokens=self.model_config.max_tokens,
-        )
-        content = (resp.choices[0].message.content or "").strip()
-        content = _strip_code_fence(content)
-        data = json.loads(content)
+            "temperature": self.model_config.temperature,
+            "max_tokens": self.model_config.max_tokens,
+            # Helps vLLM / OpenAI-compat servers emit parseable JSON
+            "response_format": {"type": "json_object"},
+        }
+        if self.model_config.extra_body:
+            create_kwargs["extra_body"] = self.model_config.extra_body
+        try:
+            resp = await client.chat.completions.create(**create_kwargs)
+        except Exception as exc:
+            # Some servers reject response_format — retry without it
+            if "response_format" in str(exc).lower() or "json_object" in str(exc).lower():
+                create_kwargs.pop("response_format", None)
+                resp = await client.chat.completions.create(**create_kwargs)
+            else:
+                raise
+        msg = resp.choices[0].message
+        content = (msg.content or "").strip()
+        if not content:
+            reasoning = getattr(msg, "reasoning_content", None) or getattr(msg, "reasoning", None) or ""
+            if isinstance(reasoning, str) and reasoning.strip():
+                content = reasoning.strip()
+        data = _parse_json_object(content)
+        # Normalize nested objects → JSON strings for shared parser
+        starter = data.get("starter_files") or {}
+        if isinstance(starter, str):
+            starter_json = starter
+        else:
+            starter_json = json.dumps(starter)
+        setup = data.get("setup_commands") or []
+        setup_json = setup if isinstance(setup, str) else json.dumps(setup)
+        verifier = data.get("verifier") or {"type": "pytest"}
+        verifier_json = verifier if isinstance(verifier, str) else json.dumps(verifier)
+        meta = data.get("metadata") or {"difficulty": difficulty}
+        meta_json = meta if isinstance(meta, str) else json.dumps(meta)
         return parse_task_from_prediction(
             task_id=data.get("task_id", f"gen_{uuid.uuid4().hex[:8]}"),
             description=data["description"],
-            starter_files_json=json.dumps(data.get("starter_files") or {}),
-            setup_commands_json=json.dumps(data.get("setup_commands") or []),
-            verifier_json=json.dumps(data.get("verifier") or {"type": "pytest"}),
-            metadata_json=json.dumps(data.get("metadata") or {"difficulty": difficulty}),
+            starter_files_json=starter_json,
+            setup_commands_json=setup_json,
+            verifier_json=verifier_json,
+            metadata_json=meta_json,
             generator_model=self.config.model,
         )
 
@@ -214,3 +375,91 @@ def _strip_code_fence(text: str) -> str:
     if m:
         return m.group(1)
     return text
+
+
+def _repair_json_text(text: str) -> str:
+    """Best-effort fixes for common LLM JSON mistakes."""
+    # trailing commas before } or ]
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+    # python-ish True/False/None
+    text = re.sub(r"\bTrue\b", "true", text)
+    text = re.sub(r"\bFalse\b", "false", text)
+    text = re.sub(r"\bNone\b", "null", text)
+    return text
+
+
+def _parse_json_object(text: str) -> dict[str, Any]:
+    """Parse a JSON object from model text, including CoT-wrapped / slightly broken JSON."""
+    text = _strip_code_fence((text or "").strip())
+    if not text:
+        raise ValueError("empty model response")
+
+    candidates = [text]
+    start, end = text.find("{"), text.rfind("}")
+    if start >= 0 and end > start:
+        candidates.append(text[start : end + 1])
+
+    last_err: Exception | None = None
+    for cand in candidates:
+        for variant in (cand, _repair_json_text(cand)):
+            try:
+                data = json.loads(variant, strict=False)
+                if isinstance(data, dict):
+                    return data
+            except json.JSONDecodeError as exc:
+                last_err = exc
+                continue
+
+    # Last resort: escape raw control chars inside strings (very common with code blobs)
+    try:
+        repaired = _escape_raw_controls_in_strings(candidates[-1])
+        data = json.loads(_repair_json_text(repaired), strict=False)
+        if isinstance(data, dict):
+            return data
+    except Exception as exc:
+        last_err = exc
+
+    # Optional json_repair dependency
+    try:
+        from json_repair import repair_json  # type: ignore
+
+        data = repair_json(candidates[-1], return_objects=True)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+
+    raise ValueError(
+        f"could not parse JSON object from model response ({len(text)} chars): {last_err}"
+    )
+
+
+def _escape_raw_controls_in_strings(text: str) -> str:
+    """Escape raw newlines/tabs that appear inside JSON string literals."""
+    out: list[str] = []
+    in_str = False
+    escape = False
+    for ch in text:
+        if escape:
+            out.append(ch)
+            escape = False
+            continue
+        if ch == "\\":
+            out.append(ch)
+            escape = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            out.append(ch)
+            continue
+        if in_str and ch == "\n":
+            out.append("\\n")
+            continue
+        if in_str and ch == "\r":
+            out.append("\\r")
+            continue
+        if in_str and ch == "\t":
+            out.append("\\t")
+            continue
+        out.append(ch)
+    return "".join(out)

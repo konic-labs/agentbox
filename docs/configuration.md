@@ -84,14 +84,19 @@ Located in `agentbox.tasks.generate.generator`:
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `model` | required | Teacher model for generation |
-| `base_url` / `api_key` | optional | Same OpenAI-compatible pattern |
+| `base_url` / `api_key` | optional | OpenAI-compatible (vLLM/TGI/cloud) |
 | `temperature` | `0.8` | Higher diversity for generation |
 | `max_tokens` | `8192` | Large enough for multi-file tasks |
 | `validate_in_docker` | `True` | Live seed + verifier QC |
+| `validate_with_llm` | `True` | Second API call: DSPy task quality judge |
+| `llm_judge_min_score` | `0.65` | Min judge score (0..1) to accept |
+| `validator_model` | same as `model` | Optional separate judge model id |
+| `validator_base_url` / `validator_api_key` | same as teacher | Optional separate judge endpoint |
 | `sandbox` | network on | QC sandbox config |
 | `max_retries` | `2` | Regenerate on QC failure |
 | `use_dspy` | `True` | Fall back to JSON mode if DSPy missing |
-| `expect_fail_on_starter` | `True` | QC rejects tasks that already pass |
+| `expect_fail_on_starter` | `True` | Docker QC rejects tasks that already pass |
+| `disable_thinking` | `True` | Auto-disable Qwen/GLM deep-thinking extras |
 
 ## Environment variables
 
