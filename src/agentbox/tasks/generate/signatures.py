@@ -92,7 +92,11 @@ def get_validate_coding_task_signature() -> Any:
             desc="True only if the task is a good agent coding task"
         )
         score: float = dspy.OutputField(
-            desc="Quality score 0.0-1.0 (1.0 = excellent agent task)"
+            desc=(
+                "Quality score in buckets: 0.2=reject garbage, 0.4=weak/leaky, "
+                "0.6=borderline stubs+tests, 0.8=solid agent task, 1.0=excellent. "
+                "Avoid all-1.0; use the ladder."
+            )
         )
         starter_is_near_solution: bool = dspy.OutputField(
             desc="True if non-test starter is nearly a full correct implementation"

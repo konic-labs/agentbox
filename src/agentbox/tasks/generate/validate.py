@@ -94,8 +94,13 @@ async def validate_task_live(
     *,
     sandbox_config: SandboxConfig | None = None,
     expect_fail_on_starter: bool = True,
+    solution_files: dict[str, str] | None = None,
 ) -> ValidationReport:
-    """Schema is assumed valid; run seed + verifier smoke in Docker."""
+    """Schema is assumed valid; run seed + verifier smoke in Docker.
+
+    When ``solution_files`` is provided (two-stage gen), also inject the golden
+    solution and require the verifier to pass (starter must still fail first).
+    """
     errors: list[str] = []
     warnings: list[str] = []
     cfg = sandbox_config or SandboxConfig(
@@ -133,6 +138,33 @@ async def validate_task_live(
                 details={"verify_exit_code": verify.exit_code},
             )
 
+        details: dict[str, Any] = {
+            "verify_exit_code": verify.exit_code,
+            "starter_fail_exit_code": verify.exit_code,
+        }
+
+        if solution_files:
+            # Overwrite workspace with golden solution files and re-verify
+            sol = {str(k): str(v) for k, v in solution_files.items()}
+            await manager.write_files(sandbox, sol)
+            verify_sol = await Verifier(manager).verify(sandbox, task.verifier)
+            details["solution_verify_exit_code"] = verify_sol.exit_code
+            if not verify_sol.success:
+                return ValidationReport(
+                    ok=False,
+                    task=task,
+                    errors=[
+                        "golden solution does not pass verifier "
+                        f"(exit={verify_sol.exit_code})"
+                    ],
+                    warnings=warnings,
+                    seed_ok=True,
+                    verifier_runs=True,
+                    verifier_fails_on_starter=fails_on_starter,
+                    details=details,
+                )
+            details["solution_passes"] = True
+
         return ValidationReport(
             ok=True,
             task=task,
@@ -140,7 +172,7 @@ async def validate_task_live(
             seed_ok=True,
             verifier_runs=verifier_runs,
             verifier_fails_on_starter=fails_on_starter,
-            details={"verify_exit_code": verify.exit_code},
+            details=details,
         )
     except Exception as exc:
         logger.exception("live validation failed")

@@ -44,9 +44,10 @@ owns the virtual env and trajectory collection.
 - **Objective rewards** — pytest / command verifiers (hybrid-ready with ART RULER)
 - **ParallelRunner** — concurrent rollouts and GRPO-style groups
 - **Trajectory export** — JSON, JSONL, ART-native dicts
-- **Typer CLI** — `doctor`, `run`, `run-dir`, `bench`, `export`, `build-image`, `prune`
-- **Real-rollout benchmarks** — freeze tasks + env; score any OpenAI-compatible model
-- **Task generation** — frontier model + optional DSPy + live Docker QC
+- **Typer CLI** — `doctor`, `generate`, `bench`, `traj`, `run`, `export`, `prune`
+- **Real-rollout benchmarks** — freeze tasks + env; multi-student scoring
+- **Task generation** — batch + two-stage stubs + static/Docker/LLM QC (no private scripts)
+- **Trajectory HTML** — official verifier vs agent self-check dashboard
 
 ## Quick Start
 
@@ -258,17 +259,54 @@ agentbox export traj.json --format art -o traj.art.json
 python examples/art_integration.py
 ```
 
+## Production workflows
+
+End-to-end lab path **without private scripts**:
+
+```bash
+# 0) Optional project config (teacher + students)
+cp examples/agentbox.yaml ./agentbox.yaml   # edit endpoints
+
+# 1) Probe tool-calling before a long suite
+agentbox doctor --model MODEL --base-url http://localhost:8000/v1
+
+# 2) Generate a QC-passed task set
+agentbox generate batch -m MODEL --base-url URL -n 20 -c 8 --two-stage \
+  -o generated/tasks
+
+# 3) Freeze a suite and run multi-student bench
+agentbox bench create suites/coding-v1 --from-tasks generated/tasks \
+  --suite-id coding-v1 --name "coding v1"
+agentbox bench run suites/coding-v1 \
+  --student small=qwen3.5:0.8b@http://localhost:11434/v1 \
+  --student big=MODEL@http://localhost:8000/v1 \
+  --probe --out bench-results/run1
+
+# 4) Inspect
+agentbox bench show bench-results/run1/report.json --out REPORT.md
+agentbox traj render bench-results/run1 -o traj-dash.html
+
+# 5) ART offline groups
+python examples/art_grpo_offline.py
+```
+
+Details: [docs/generation.md](docs/generation.md) · [docs/art_grpo.md](docs/art_grpo.md) · [docs/trajectories.md](docs/trajectories.md).
+
 ## CLI Reference
 
 ```bash
-agentbox doctor [--prune]
+agentbox doctor [--prune] [--model M --base-url URL]
 agentbox build-image [--tag agentbox/sandbox:latest]
+agentbox generate one|batch|validate-llm|validate-docker …
 agentbox run TASK.json -m MODEL --base-url URL [--network] [--out trajectories/]
 agentbox run-dir tasks/ -m MODEL --base-url URL -c 16 --n 4
 agentbox bench create DIR --from-tasks tasks/ --suite-id ID --name NAME
 agentbox bench freeze DIR && agentbox bench validate DIR --strict
 agentbox bench run DIR -m MODEL --base-url URL --model-id LABEL -o bench-results/run1
-agentbox bench show bench-results/run1/report.json
+agentbox bench run DIR --student id=model@url --probe --limit 5
+agentbox bench show bench-results/run1/report.json --out extended.md
+agentbox traj show traj.json
+agentbox traj render bench-results/run1 -o traj-dash.html
 agentbox export traj.json --format art -o out.json
 agentbox prune
 ```

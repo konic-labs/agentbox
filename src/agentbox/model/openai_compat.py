@@ -73,20 +73,41 @@ class OpenAICompatClient:
             params["extra_body"] = self.config.extra_body
         params.update(kwargs)
 
-        try:
-            response = await self._client.chat.completions.create(**params)
-        except BadRequestError as exc:
-            msg = str(exc)
-            if tools and ("tool" in msg.lower() or "function" in msg.lower()):
-                raise ModelError(
-                    "Model/server does not appear to support tool calling. "
-                    f"Details: {msg}"
-                ) from exc
-            raise ModelError(f"Chat completion failed: {msg}") from exc
-        except APIError as exc:
-            raise ModelError(f"Chat completion API error: {exc}") from exc
-        except Exception as exc:
-            raise ModelError(f"Chat completion failed: {exc}") from exc
+        # Simple retry for transient rate limits / 5xx (train-cluster friendliness)
+        import asyncio
+
+        response = None
+        last_exc: Exception | None = None
+        for attempt in range(4):
+            try:
+                response = await self._client.chat.completions.create(**params)
+                last_exc = None
+                break
+            except BadRequestError as exc:
+                msg = str(exc)
+                if tools and ("tool" in msg.lower() or "function" in msg.lower()):
+                    raise ModelError(
+                        "Model/server does not appear to support tool calling. "
+                        f"Details: {msg}"
+                    ) from exc
+                raise ModelError(f"Chat completion failed: {msg}") from exc
+            except APIError as exc:
+                last_exc = exc
+                msg = str(exc).lower()
+                retryable = any(
+                    x in msg
+                    for x in ("429", "rate", "timeout", "503", "502", "overloaded", "connection")
+                )
+                if not retryable or attempt == 3:
+                    raise ModelError(f"Chat completion API error: {exc}") from exc
+                await asyncio.sleep(min(2 ** attempt, 8))
+            except Exception as exc:
+                last_exc = exc
+                if attempt == 3:
+                    raise ModelError(f"Chat completion failed: {exc}") from exc
+                await asyncio.sleep(min(2 ** attempt, 8))
+        if response is None:
+            raise ModelError(f"Chat completion failed: {last_exc}") from last_exc
 
         if not response.choices:
             raise ModelError("Chat completion returned no choices")

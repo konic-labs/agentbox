@@ -46,11 +46,12 @@ Control plane (prompts, models, trajectories) stays on the host. Execution plane
 | [Models](models.md) | OpenAI-compatible client, providers, mock client |
 | [Agent](agent.md) | Agent facade, loop, prompts, timeouts |
 | [Tasks](tasks.md) | Task schema, seeder, verifier, filters, bulk I/O, rewards |
-| [Task Generation](generation.md) | Automated generation, DSPy, live QC |
-| [Trajectories](trajectories.md) | Message format, recorder, JSON / ART / JSONL export |
+| [Task Generation](generation.md) | Automated generation, batch, two-stage, DSPy, static/Docker/LLM QC |
+| [Trajectories](trajectories.md) | Message format, recorder, JSON / ART / JSONL, HTML render |
 | [Runner](runner.md) | `Rollout.run`, `ParallelRunner`, GRPO-style groups |
 | [Metrics](metrics.md) | Aggregate success rate, steps, per-task stats |
-| [CLI](cli.md) | Typer commands, flags, exit codes |
+| [CLI](cli.md) | Typer commands: generate, bench, traj, doctor, … |
+| [ART / GRPO](art_grpo.md) | Offline groups, online sketch, hybrid rewards |
 | [Security](security.md) | Isolation model, network, path jail, residual risk |
 | [Benchmarks](benchmarks.md) | Frozen real-rollout suites, multi-model reports, setup checks |
 | [Development](development.md) | Tests, packaging, extension checklist |

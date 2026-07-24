@@ -109,12 +109,24 @@ def bench_run(
     base_url: Optional[str] = typer.Option(None, "--base-url"),
     api_key: Optional[str] = typer.Option(None, "--api-key", envvar="OPENAI_API_KEY"),
     models_file: Optional[Path] = typer.Option(None, "--models-file"),
+    student: Optional[list[str]] = typer.Option(
+        None,
+        "--student",
+        help="Repeatable student spec: id=MODEL@BASE_URL (api key via env/OPENAI_API_KEY)",
+    ),
     concurrency: Optional[int] = typer.Option(None, "--concurrency", "-c"),
     n: Optional[int] = typer.Option(None, "--n"),
+    limit: Optional[int] = typer.Option(None, "--limit", help="Only first N tasks"),
     save_trajectories: bool = typer.Option(True, "--save-trajectories/--no-save-trajectories"),
     strict: bool = typer.Option(False, "--strict"),
     min_success_rate: Optional[float] = typer.Option(None, "--min-success-rate"),
     mock: bool = typer.Option(False, "--mock", help="Run with MockModelClient (no LLM)"),
+    probe: bool = typer.Option(
+        False, "--probe", help="Probe tool-calling on each model before the suite"
+    ),
+    disable_thinking: bool = typer.Option(
+        False, "--disable-thinking", help="Send Qwen/GLM thinking-off extra_body"
+    ),
 ) -> None:
     """Run a suite against one or more OpenAI-compatible models."""
     from agentbox.benchmark.loader import load_suite
@@ -125,18 +137,30 @@ def bench_run(
     from agentbox.model.mock import MockModelClient
 
     suite = load_suite(suite_dir)
+    if limit and limit > 0:
+        suite.tasks = suite.tasks[:limit]
+        typer.echo(f"SUBSET: first {len(suite.tasks)} tasks")
     models: list[ModelUnderTest] = []
 
     if models_file:
         models.extend(_load_models_file(models_file))
+    if student:
+        models.extend(_parse_students(student, api_key=api_key, disable_thinking=disable_thinking))
     if model:
+        extra: dict = {}
+        if disable_thinking:
+            extra = {
+                "enable_thinking": False,
+                "chat_template_kwargs": {"enable_thinking": False},
+            }
         models.append(
             ModelUnderTest(
-                model_id=model_id or model,
+                model_id=model_id or model.replace("/", "-").replace(":", "-"),
                 model=ModelConfig(
                     model=model,
                     base_url=base_url,
                     api_key=api_key,
+                    extra_body=extra,
                 ),
             )
         )
@@ -149,9 +173,48 @@ def bench_run(
             )
         ]
 
+    if not models and not mock:
+        # Fall back to agentbox.yaml students
+        try:
+            from agentbox.config_load import load_project_config
+
+            pcfg = load_project_config()
+            for s in pcfg.students:
+                mid = s.id or s.model.replace("/", "-").replace(":", "-")
+                models.append(
+                    ModelUnderTest(
+                        model_id=mid,
+                        model=ModelConfig(
+                            model=s.model,
+                            base_url=s.base_url,
+                            api_key=s.api_key or api_key or "EMPTY",
+                            temperature=s.temperature,
+                            max_tokens=s.max_tokens,
+                            extra_body=dict(s.extra_body or {}),
+                        ),
+                    )
+                )
+        except Exception:
+            pass
+
     if not models:
-        typer.secho("Provide --model / --models-file or --mock", fg=typer.colors.RED)
+        typer.secho(
+            "Provide --model / --student / --models-file / --mock "
+            "or students in agentbox.yaml",
+            fg=typer.colors.RED,
+        )
         raise typer.Exit(2)
+
+    if probe and not mock:
+        from agentbox.model.probe import format_probe_results, probe_endpoint
+
+        for mut in models:
+            typer.echo(f"probe {mut.model_id}…")
+            results = asyncio.run(probe_endpoint(mut.model, require_tools=True))
+            typer.echo(format_probe_results(results))
+            if any(not r.ok for r in results):
+                typer.secho(f"probe failed for {mut.model_id}", fg=typer.colors.RED)
+                raise typer.Exit(2)
 
     async def _run():
         # For --mock, inject via ParallelRunner is hard; use BenchmarkRunner with real
@@ -184,6 +247,45 @@ def bench_run(
         if best < min_success_rate:
             raise typer.Exit(1)
     raise typer.Exit(0)
+
+
+def _parse_students(
+    specs: list[str],
+    *,
+    api_key: str | None,
+    disable_thinking: bool,
+) -> list:
+    """Parse id=model@base_url student specs."""
+    from agentbox.benchmark.schema import ModelUnderTest
+    from agentbox.config import ModelConfig
+
+    out = []
+    for spec in specs:
+        # id=model@http://host:port/v1
+        if "=" not in spec or "@" not in spec:
+            raise typer.BadParameter(
+                f"Invalid --student {spec!r}; expected id=model@base_url"
+            )
+        mid, rest = spec.split("=", 1)
+        model_name, burl = rest.rsplit("@", 1)
+        extra: dict = {}
+        if disable_thinking:
+            extra = {
+                "enable_thinking": False,
+                "chat_template_kwargs": {"enable_thinking": False},
+            }
+        out.append(
+            ModelUnderTest(
+                model_id=mid,
+                model=ModelConfig(
+                    model=model_name,
+                    base_url=burl,
+                    api_key=api_key or "EMPTY",
+                    extra_body=extra,
+                ),
+            )
+        )
+    return out
 
 
 async def _run_mock_suite(suite, out, concurrency, n, save_trajectories, strict):
@@ -297,17 +399,156 @@ def _load_models_file(path: Path) -> list:
 
 
 @bench_app.command("show")
-def bench_show(report: Path = typer.Argument(...)) -> None:
-    """Print leaderboard from a report.json."""
+def bench_show(
+    report: Path = typer.Argument(...),
+    out: Optional[Path] = typer.Option(None, "--out", help="Write extended markdown"),
+    traj_dir: Optional[Path] = typer.Option(
+        None,
+        "--traj-dir",
+        help="Optional run dir to mine failure clusters from trajectories",
+    ),
+) -> None:
+    """Print leaderboard and per-model status breakdown from a report.json."""
+    from collections import Counter
+
     from agentbox.benchmark.schema import BenchmarkReport
 
     r = BenchmarkReport.load(report)
     typer.echo(f"suite={r.suite_id} v{r.suite_version} hash={r.suite_content_hash}")
+    lines = [
+        f"# Bench report: {r.suite_id}",
+        "",
+        f"- version: {r.suite_version}",
+        f"- content_hash: `{r.suite_content_hash}`",
+        "",
+        "## Leaderboard",
+        "",
+    ]
     for row in r.leaderboard:
         typer.echo(
             f"{row['model_id']}: success_rate={row['success_rate']:.3f} "
-            f"mean_reward={row['mean_reward']:.3f} n={row['n']}"
+            f"mean_reward={row['mean_reward']:.3f} mean_steps={row.get('mean_steps', 0):.2f} "
+            f"n={row['n']}"
         )
+        lines.append(
+            f"- **{row['model_id']}**: success={row['success_rate']:.3f} "
+            f"reward={row['mean_reward']:.3f} steps={row.get('mean_steps', 0):.2f} n={row['n']}"
+        )
+
+    lines.append("")
+    lines.append("## Per-model status & tasks")
+    lines.append("")
+    # Cross-model task matrix when multiple models
+    model_ids = [mr.model_id for mr in r.models]
+    task_pass: dict[str, dict[str, float]] = {}
+    for mr in r.models:
+        typer.echo(f"\n[{mr.model_id}]")
+        lines.append(f"### {mr.model_id}")
+        agg = getattr(mr, "aggregate", None)
+        if agg is not None:
+            by_status = getattr(agg, "by_status", None) or {}
+            if by_status:
+                typer.echo(f"  statuses={by_status}")
+                lines.append(f"- statuses: `{by_status}`")
+            typer.echo(
+                f"  success_rate={getattr(agg, 'success_rate', mr.success_rate if hasattr(mr, 'success_rate') else 'n/a')}"
+            )
+        # per-task rows
+        task_rows = getattr(mr, "by_task", None) or []
+        if task_rows:
+            lines.append("")
+            lines.append("| Task | successes | pass@1 | mean steps | statuses |")
+            lines.append("| --- | --- | --- | --- | --- |")
+            for tr in task_rows:
+                if hasattr(tr, "model_dump"):
+                    d = tr.model_dump()
+                elif isinstance(tr, dict):
+                    d = tr
+                else:
+                    continue
+                tid = d.get("task_id") or "?"
+                suc = d.get("successes", 0)
+                p1 = d.get("pass_at_1", d.get("success_rate", 0))
+                ms = d.get("mean_steps", 0)
+                st = d.get("statuses") or {}
+                task_pass.setdefault(tid, {})[mr.model_id] = float(p1 or 0)
+                typer.echo(
+                    f"  {tid}: successes={suc} pass@1={p1} steps={ms} statuses={st}"
+                )
+                lines.append(f"| {tid} | {suc} | {p1} | {ms} | `{st}` |")
+        lines.append("")
+
+    if len(model_ids) > 1 and task_pass:
+        lines.append("## Task × model pass matrix")
+        lines.append("")
+        header = "| Task | " + " | ".join(model_ids) + " |"
+        sep = "| --- | " + " | ".join(["---"] * len(model_ids)) + " |"
+        lines.append(header)
+        lines.append(sep)
+        for tid in sorted(task_pass):
+            cells = [
+                f"{task_pass[tid].get(mid, 0):.2f}" for mid in model_ids
+            ]
+            lines.append(f"| {tid} | " + " | ".join(cells) + " |")
+        lines.append("")
+
+    # Failure clusters from trajectories if available
+    run_dir = traj_dir
+    if run_dir is None:
+        cand = report.parent if report.is_file() else report
+        if (cand / "models").is_dir():
+            run_dir = cand
+    if run_dir and run_dir.is_dir():
+        clusters = _failure_clusters(run_dir)
+        if clusters:
+            lines.append("## Top failure clusters")
+            lines.append("")
+            typer.echo("\n[failure clusters]")
+            for fp, count, sample in clusters[:12]:
+                typer.echo(f"  n={count}  {fp[:100]}")
+                lines.append(f"- **n={count}** `{fp[:120]}`")
+                if sample:
+                    lines.append(f"  - sample task: `{sample}`")
+            lines.append("")
+
+    if out:
+        out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        typer.echo(f"wrote {out}")
+
+
+def _failure_clusters(run_dir: Path) -> list[tuple[str, int, str]]:
+    """Fingerprint failed trajs by verify_exit + truncated verify_stdout head."""
+    import hashlib
+    import re
+    from collections import defaultdict
+
+    from agentbox.trajectory.schema import Trajectory
+
+    buckets: dict[str, list[str]] = defaultdict(list)
+    for path in run_dir.rglob("*.json"):
+        if path.name == "report.json" or "suite" in path.parts:
+            continue
+        try:
+            t = Trajectory.load(path)
+        except Exception:
+            continue
+        status = t.final_status.value if hasattr(t.final_status, "value") else str(t.final_status)
+        if status == "success":
+            continue
+        meta = t.metadata or {}
+        exit_c = meta.get("verify_exit_code")
+        stdout = str(meta.get("verify_stdout") or "")[:400]
+        # normalize volatile bits
+        stdout = re.sub(r"\d+\.\d+s", "Ts", stdout)
+        stdout = re.sub(r"0x[0-9a-fA-F]+", "0xADDR", stdout)
+        key_src = f"exit={exit_c}|{stdout[:200]}"
+        fp = hashlib.sha1(key_src.encode()).hexdigest()[:10] + " " + key_src.replace("\n", " ")[:80]
+        buckets[fp].append(t.task_id)
+    ranked = sorted(
+        ((fp, len(ids), ids[0] if ids else "") for fp, ids in buckets.items()),
+        key=lambda x: -x[1],
+    )
+    return ranked
 
 
 @bench_app.command("compare")

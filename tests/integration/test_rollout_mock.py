@@ -83,3 +83,9 @@ async def test_mock_fizzbuzz_rollout() -> None:
     assert traj.final_status == FinalStatus.SUCCESS
     assert traj.reward == 1.0
     assert traj.metrics.steps >= 1
+    # Official verifier ground truth (P0.2)
+    assert traj.metadata.get("verify_success") is True
+    assert traj.metadata.get("verify_exit_code") == 0
+    assert "pytest" in (traj.metadata.get("verify_command") or "")
+    assert "verify_stdout" in traj.metadata
+    assert "verify_stderr" in traj.metadata

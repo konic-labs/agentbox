@@ -63,6 +63,17 @@ class GenerateConfig(BaseModel):
     extra_body: dict[str, Any] = Field(default_factory=dict)
     # Auto-disable deep-thinking for structured gen/judge when possible
     disable_thinking: bool = True
+    # Static QC before docker/llm (stubs, asserts, leaks)
+    validate_static: bool = True
+    static_min_asserts: int = 3
+    static_require_stubs: bool = True
+    static_strict_paths: bool = False
+    # Two-stage: teacher emits solution_files; we AST-strip to starter stubs
+    two_stage: bool = False
+    # Keep golden solution in metadata (not in suite starter by default)
+    keep_solution_in_metadata: bool = False
+    # Optional content-addressed QC cache root
+    validation_cache_dir: str | None = None
 
 
 def _default_thinking_extra(model: str, disable_thinking: bool) -> dict[str, Any]:
@@ -156,6 +167,22 @@ class TaskGenerator:
                     meta_tags = list(task.metadata.get("tags") or [])
                     task.metadata["tags"] = sorted(set(meta_tags + tags))
 
+                if self.config.validate_static:
+                    from agentbox.tasks.generate.static_qc import validate_task_static
+
+                    static = validate_task_static(
+                        task,
+                        min_asserts=self.config.static_min_asserts,
+                        require_stubs=self.config.static_require_stubs,
+                        strict_paths=self.config.static_strict_paths,
+                    )
+                    if not static.ok:
+                        last_error = "; ".join(static.errors) or "static QC failed"
+                        logger.warning(
+                            "generate attempt %d static QC: %s", attempt + 1, last_error
+                        )
+                        continue
+
                 report = await self.validate_task(task, domain=domain)
                 if not report.ok:
                     last_error = "; ".join(report.errors) or "validation failed"
@@ -167,6 +194,26 @@ class TaskGenerator:
                 if report.llm_score is not None:
                     task.metadata["llm_judge_score"] = report.llm_score
                     task.metadata["llm_judge_accept"] = report.llm_accept
+                from agentbox.tasks.generate.dedup import (
+                    difficulty_heuristic,
+                    task_signature_hash,
+                )
+
+                task.metadata["signature_hash"] = task_signature_hash(task)
+                task.metadata.update(
+                    {k: v for k, v in difficulty_heuristic(task).items()}
+                )
+                # Drop golden solution from shipped task unless explicitly kept.
+                # Only strip after Docker QC consumed it; batch mode disables Docker
+                # here and needs solution_files for its own golden-pass stage.
+                if (
+                    task.metadata.get("solution_files")
+                    and not self.config.keep_solution_in_metadata
+                    and self.config.validate_in_docker
+                ):
+                    task.metadata.pop("solution_files", None)
+                    task.metadata.pop("_solution_ephemeral", None)
+                    # keep has_hidden_solution flag as provenance only
                 return task
             except Exception as exc:
                 last_error = str(exc)
@@ -201,13 +248,35 @@ class TaskGenerator:
         domain: str = "python",
     ) -> ValidationReport:
         """Run configured QC stages: Docker fail-on-starter and/or LLM judge."""
+        cache = None
+        if self.config.validation_cache_dir:
+            from pathlib import Path
+
+            from agentbox.jobs.cache import ValidationCache
+
+            cache = ValidationCache(Path(self.config.validation_cache_dir))
+            hit = cache.get(task)
+            if hit is not None:
+                try:
+                    return ValidationReport.model_validate(hit)
+                except Exception:
+                    pass
+
         reports: list[ValidationReport] = []
+        solution_files = None
+        if task.metadata.get("has_hidden_solution") and task.metadata.get(
+            "solution_files"
+        ):
+            solution_files = {
+                str(k): str(v) for k, v in task.metadata["solution_files"].items()
+            }
 
         if self.config.validate_in_docker:
             docker_report = await validate_task_live(
                 task,
                 sandbox_config=self.config.sandbox,
                 expect_fail_on_starter=self.config.expect_fail_on_starter,
+                solution_files=solution_files,
             )
             reports.append(docker_report)
             if not docker_report.ok:
@@ -225,11 +294,18 @@ class TaskGenerator:
             reports.append(llm_report)
 
         if not reports:
-            return ValidationReport(ok=True, task=task, warnings=["no QC stages enabled"])
+            result = ValidationReport(ok=True, task=task, warnings=["no QC stages enabled"])
+        elif len(reports) == 1:
+            result = reports[0]
+        else:
+            result = merge_validation_reports(*reports, task=task)
 
-        if len(reports) == 1:
-            return reports[0]
-        return merge_validation_reports(*reports, task=task)
+        if cache is not None:
+            try:
+                cache.put(task, result.model_dump(mode="json"))
+            except Exception:
+                pass
+        return result
 
     async def validate_task_llm_only(
         self,
@@ -254,9 +330,80 @@ class TaskGenerator:
         domain: str,
         constraints: str,
     ) -> Task:
-        if self._dspy_module is not None:
-            return await self._generate_dspy(difficulty, domain, constraints)
-        return await self._generate_openai_json(difficulty, domain, constraints)
+        if self.config.two_stage:
+            task = await self._generate_two_stage(difficulty, domain, constraints)
+        elif self._dspy_module is not None:
+            task = await self._generate_dspy(difficulty, domain, constraints)
+        else:
+            task = await self._generate_openai_json(difficulty, domain, constraints)
+        return task
+
+    async def _generate_two_stage(
+        self, difficulty: str, domain: str, constraints: str
+    ) -> Task:
+        """Generate golden solution+tests, then AST-strip solution → stubs."""
+        from agentbox.tasks.generate.strip_impl import strip_impl_files
+
+        # Prefer OpenAI JSON for structured solution_files; more reliable than DSPy field
+        task = await self._generate_openai_json(
+            difficulty,
+            domain,
+            (constraints or "")
+            + " TWO_STAGE=1: include solution_files (full correct impl) AND "
+            "starter will be derived by stripping. Put full impl under solution_files "
+            "key in JSON; starter_files may equal solution or be omitted for non-tests.",
+            two_stage=True,
+        )
+        solution = task.metadata.get("solution_files")
+        if not isinstance(solution, dict) or not solution:
+            # Fall back: treat non-test starter as solution and strip
+            solution = {
+                p: c
+                for p, c in (task.starter_files or {}).items()
+                if "test" not in str(p).lower()
+            }
+            tests = {
+                p: c
+                for p, c in (task.starter_files or {}).items()
+                if "test" in str(p).lower()
+            }
+            if not solution:
+                raise ValueError("two-stage generation produced no solution_files")
+            stripped = strip_impl_files(solution)
+            task.starter_files = {**stripped, **tests}
+        else:
+            solution = {str(k): str(v) for k, v in solution.items()}
+            tests = {
+                p: c
+                for p, c in (task.starter_files or {}).items()
+                if "test" in str(p).lower()
+            }
+            # Keep test files from starter; strip solution → starter sources
+            stripped = strip_impl_files(solution)
+            # If teacher also put tests only in solution_files, pull them out
+            sol_tests = {
+                p: c for p, c in solution.items() if "test" in str(p).lower()
+            }
+            sol_src = {
+                p: c for p, c in solution.items() if "test" not in str(p).lower()
+            }
+            if sol_tests and not tests:
+                tests = sol_tests
+            if sol_src:
+                stripped = strip_impl_files(sol_src)
+                solution = sol_src
+            task.starter_files = {**stripped, **tests}
+
+        task.metadata["has_hidden_solution"] = True
+        task.metadata["two_stage"] = True
+        if self.config.keep_solution_in_metadata:
+            task.metadata["solution_files"] = solution
+        else:
+            # Keep for Docker golden-pass during this generate() call only;
+            # strip before save if user re-saves later without flag.
+            task.metadata["solution_files"] = solution
+            task.metadata["_solution_ephemeral"] = True
+        return task
 
     async def _generate_dspy(
         self, difficulty: str, domain: str, constraints: str
@@ -294,30 +441,58 @@ class TaskGenerator:
         )
 
     async def _generate_openai_json(
-        self, difficulty: str, domain: str, constraints: str
+        self,
+        difficulty: str,
+        domain: str,
+        constraints: str,
+        *,
+        two_stage: bool = False,
     ) -> Task:
         client = build_openai_client(self.model_config)
-        system = (
-            "You generate self-contained coding tasks for agents in Docker. "
-            "Reply with ONE valid JSON object only (no markdown fences, no prose). "
-            "Keys: task_id (string), description (string), "
-            "starter_files (object mapping path string -> file content string), "
-            "setup_commands (array of strings), "
-            "verifier (object with type/command/success_exit_code), "
-            "metadata (object with difficulty, tags, estimated_steps, language). "
-            "JSON rules: escape all newlines in strings as \\n, escape quotes as \\\", "
-            "no trailing commas, no raw control characters inside strings. "
-            "CRITICAL: starter_files must be stubs (signatures + raise NotImplementedError). "
-            "Do NOT ship near-complete solutions or # BUG spoilers. "
-            "Description states API/behavior only. Prefer Python + pytest. "
-            "Starter must FAIL tests; a correct implementation must pass."
-        )
-        user = (
-            f"difficulty={difficulty}\n"
-            f"domain={domain}\n"
-            f"constraints={constraints or 'none'}\n"
-            "Return valid JSON only. Starter = stubs, not almost-solutions."
-        )
+        if two_stage:
+            system = (
+                "You generate self-contained coding tasks for agents in Docker. "
+                "Reply with ONE valid JSON object only (no markdown fences, no prose). "
+                "Keys: task_id (string), description (string), "
+                "solution_files (object path->FULL correct Python implementation), "
+                "starter_files (object path->content; include ALL test_*.py files here; "
+                "non-test sources may mirror solution or be omitted), "
+                "setup_commands (array of strings), "
+                "verifier (object with type/command/success_exit_code), "
+                "metadata (object with difficulty, tags, estimated_steps, language). "
+                "JSON rules: escape newlines as \\n, escape quotes as \\\", no trailing commas. "
+                "Description states API/behavior only — no spoilers. "
+                "solution_files must make pytest pass; tests must be thorough (>=3 asserts). "
+                "Prefer Python + pytest. Name exact file paths consistently."
+            )
+            user = (
+                f"difficulty={difficulty}\n"
+                f"domain={domain}\n"
+                f"constraints={constraints or 'none'}\n"
+                "Return valid JSON only. Include solution_files (full impl) + test files."
+            )
+        else:
+            system = (
+                "You generate self-contained coding tasks for agents in Docker. "
+                "Reply with ONE valid JSON object only (no markdown fences, no prose). "
+                "Keys: task_id (string), description (string), "
+                "starter_files (object mapping path string -> file content string), "
+                "setup_commands (array of strings), "
+                "verifier (object with type/command/success_exit_code), "
+                "metadata (object with difficulty, tags, estimated_steps, language). "
+                "JSON rules: escape all newlines in strings as \\n, escape quotes as \\\", "
+                "no trailing commas, no raw control characters inside strings. "
+                "CRITICAL: starter_files must be stubs (signatures + raise NotImplementedError). "
+                "Do NOT ship near-complete solutions or # BUG spoilers. "
+                "Description states API/behavior only. Prefer Python + pytest. "
+                "Starter must FAIL tests; a correct implementation must pass."
+            )
+            user = (
+                f"difficulty={difficulty}\n"
+                f"domain={domain}\n"
+                f"constraints={constraints or 'none'}\n"
+                "Return valid JSON only. Starter = stubs, not almost-solutions."
+            )
         create_kwargs: dict[str, Any] = {
             "model": self.model_config.model,
             "messages": [
@@ -349,16 +524,41 @@ class TaskGenerator:
         data = _parse_json_object(content)
         # Normalize nested objects → JSON strings for shared parser
         starter = data.get("starter_files") or {}
+        solution = data.get("solution_files") or {}
         if isinstance(starter, str):
             starter_json = starter
         else:
+            # If two-stage and starter empty, seed with solution so parser has files
+            if two_stage and not starter and isinstance(solution, dict) and solution:
+                starter = dict(solution)
             starter_json = json.dumps(starter)
         setup = data.get("setup_commands") or []
         setup_json = setup if isinstance(setup, str) else json.dumps(setup)
         verifier = data.get("verifier") or {"type": "pytest"}
         verifier_json = verifier if isinstance(verifier, str) else json.dumps(verifier)
         meta = data.get("metadata") or {"difficulty": difficulty}
-        meta_json = meta if isinstance(meta, str) else json.dumps(meta)
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except Exception:
+                meta = {"difficulty": difficulty}
+        if not isinstance(meta, dict):
+            meta = {"difficulty": difficulty}
+        if two_stage and isinstance(solution, dict) and solution:
+            meta["solution_files"] = {str(k): str(v) for k, v in solution.items()}
+            meta["has_hidden_solution"] = True
+        # Path layout hints for agents / static QC
+        if isinstance(starter, dict) and starter:
+            paths = sorted(str(p) for p in starter.keys())
+            meta.setdefault("layout", "src" if any(p.startswith("src/") for p in paths) else "flat")
+            non_test = [p for p in paths if "test" not in p.lower() and p.endswith(".py")]
+            if non_test:
+                meta.setdefault("primary_module", non_test[0])
+            meta.setdefault(
+                "test_paths",
+                [p for p in paths if "test" in p.lower()],
+            )
+        meta_json = json.dumps(meta)
         return parse_task_from_prediction(
             task_id=data.get("task_id", f"gen_{uuid.uuid4().hex[:8]}"),
             description=data["description"],

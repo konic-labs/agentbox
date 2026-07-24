@@ -2,6 +2,33 @@
 
 All primary knobs are Pydantic v2 models in `agentbox.config`.
 
+## Project file (`agentbox.yaml`)
+
+Optional repo-root config loaded via `agentbox.config_load.load_project_config()`.
+
+```yaml
+teacher:
+  model: Qwen/…
+  base_url: http://localhost:8000/v1
+  api_key: EMPTY
+  max_tokens: 8192
+generate:
+  concurrency: 8
+  target: 20
+  llm_judge: true
+  min_score: 0.65
+students:
+  - id: local-small
+    model: qwen3.5:0.8b
+    base_url: http://localhost:11434/v1
+```
+
+- Env interpolation: `${VAR}`
+- Discovery: `AGENTBOX_CONFIG` or walk from CWD for `agentbox.yaml` / `.yml` / `.toml` / `.json`
+- Example: `examples/agentbox.yaml`
+
+Used by `agentbox generate` (teacher defaults) and `agentbox bench run` (students when no model flags).
+
 ## ResourceLimits
 
 | Field | Default | Meaning |

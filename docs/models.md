@@ -54,11 +54,43 @@ agent = Agent(
 # Ollama
 Agent(model="qwen2.5-coder:7b", base_url="http://localhost:11434/v1", api_key="ollama")
 
-# vLLM
+# vLLM (must enable tool calling — see matrix below)
 Agent(model="Qwen/Qwen2.5-7B-Instruct", base_url="http://localhost:8000/v1")
 
 # Featherless
 Agent(model="glm-5.2", base_url="https://api.featherless.ai/v1", api_key="...")
+```
+
+## Tool calling (required for agent rollouts)
+
+AgentBox agents always send OpenAI **tools** with `tool_choice="auto"`.  
+Endpoints that reject that return `final_status=error` with **0 steps**.
+
+| Server | Typical requirement |
+| --- | --- |
+| **vLLM** | `--enable-auto-tool-choice` and `--tool-call-parser <parser>` (e.g. `hermes`, `qwen3_coder`) |
+| **Ollama** | Model with tools capability (e.g. recent Qwen chat models) |
+| **Cloud OpenAI-compat** | Provider must support function/tool calling |
+
+Probe before a long bench:
+
+```bash
+agentbox doctor \
+  --model /data/models/unsloth/Qwen3.6-27B-NVFP4 \
+  --base-url http://localhost:8000/v1 \
+  --api-key EMPTY
+```
+
+Python:
+
+```python
+from agentbox.config import ModelConfig
+from agentbox.model.probe import probe_endpoint
+
+results = await probe_endpoint(ModelConfig(
+    model="…", base_url="http://localhost:8000/v1", api_key="EMPTY"
+))
+assert all(r.ok for r in results)
 ```
 
 ## Request / response shape

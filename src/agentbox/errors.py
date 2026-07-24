@@ -55,6 +55,22 @@ class TaskGenerationError(AgentBoxError):
     """Automated task generation failed after retries."""
 
 
+class TaskGenerationParseError(TaskGenerationError):
+    """Teacher response could not be parsed into a Task."""
+
+
+class TaskGenerationDockerQCError(TaskGenerationError):
+    """Docker seed/verifier QC rejected the generated task."""
+
+
+class TaskGenerationLLMJudgeError(TaskGenerationError):
+    """LLM judge rejected the generated task."""
+
+
+class TaskGenerationStaticQCError(TaskGenerationError):
+    """Static quality checks rejected the generated task."""
+
+
 class BenchmarkError(AgentBoxError):
     """Benchmark suite or run failed."""
 

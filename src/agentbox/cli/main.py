@@ -18,8 +18,12 @@ app = typer.Typer(
 )
 
 from agentbox.cli.bench import bench_app  # noqa: E402
+from agentbox.cli.generate import generate_app  # noqa: E402
+from agentbox.cli.traj import traj_app  # noqa: E402
 
 app.add_typer(bench_app, name="bench")
+app.add_typer(generate_app, name="generate")
+app.add_typer(traj_app, name="traj")
 
 
 @app.command()
@@ -31,13 +35,26 @@ def version() -> None:
 @app.command()
 def doctor(
     prune: bool = typer.Option(False, "--prune", help="Remove orphan agentbox containers"),
+    model: Optional[str] = typer.Option(
+        None, "--model", "-m", help="Probe this model id (OpenAI-compatible)"
+    ),
+    base_url: Optional[str] = typer.Option(
+        None, "--base-url", help="Model API base URL for probe"
+    ),
+    api_key: Optional[str] = typer.Option(
+        None, "--api-key", envvar="OPENAI_API_KEY", help="API key for model probe"
+    ),
+    skip_tools: bool = typer.Option(
+        False, "--skip-tools", help="Only probe chat (skip tool_choice=auto)"
+    ),
 ) -> None:
-    """Check Docker, Python, and sandbox image readiness."""
+    """Check Docker, Python, sandbox image, and optional model tool-calling."""
     import sys
 
     typer.echo(f"agentbox {__version__}")
     typer.echo(f"python {sys.version.split()[0]}")
 
+    exit_code = 0
     try:
         from agentbox.sandbox import docker_backend
 
@@ -63,6 +80,35 @@ def doctor(
         removed = prune_agentbox_containers(client)
         typer.echo(f"pruned: {len(removed)}")
 
+    if model or base_url:
+        if not model:
+            typer.secho(
+                "model probe: FAIL (--model required when probing an endpoint)",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+        from agentbox.config import ModelConfig
+        from agentbox.model.probe import format_probe_results, probe_endpoint
+
+        cfg = ModelConfig(
+            model=model,
+            base_url=base_url,
+            api_key=api_key or "EMPTY",
+            temperature=0.0,
+            max_tokens=64,
+            timeout_s=60.0,
+        )
+        typer.echo(f"model probe: {model} @ {base_url or 'default'}")
+        results = asyncio.run(probe_endpoint(cfg, require_tools=not skip_tools))
+        typer.echo(format_probe_results(results))
+        if any(not r.ok for r in results):
+            typer.secho("model probe: FAIL", fg=typer.colors.RED)
+            exit_code = 2
+        else:
+            typer.secho("model probe: ok", fg=typer.colors.GREEN)
+
+    if exit_code:
+        raise typer.Exit(exit_code)
 
 @app.command("build-image")
 def build_image(

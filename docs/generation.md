@@ -65,15 +65,35 @@ python examples/generate_tasks.py \
   --out tasks/generated
 ```
 
+## CLI
+
+```bash
+# Single task (teacher from flags or agentbox.yaml)
+agentbox generate one -m MODEL --base-url http://localhost:8000/v1 --out generated/tasks
+
+# Batch with resume, static/docker/llm QC, dedup
+agentbox generate batch -m MODEL --base-url URL -n 20 -c 8 \
+  --static-qc --docker-qc --llm-judge --dedup --out generated/tasks
+
+# Two-stage: full golden solution → AST stubs → starter-fail + solution-pass
+agentbox generate batch -m MODEL --base-url URL -n 20 --two-stage
+
+# Re-audit
+agentbox generate validate-llm generated/tasks -m MODEL --base-url URL
+agentbox generate validate-docker generated/tasks
+```
+
 ## Pipeline
 
 ```txt
 Teacher (DSPy Predict or OpenAI JSON)  [API call 1]
   -> parse fields -> Task
-  -> Docker: seed + verifier
-  -> reject if seed fails OR starter already passes
+  -> [optional two-stage] solution_files → AST strip → starter stubs
+  -> Static QC (stubs, asserts, leaks, path consistency)
+  -> Docker: seed + verifier fails on starter
+  -> [two-stage] inject golden → verifier must pass
   -> LLM judge (DSPy ValidateCodingTask)  [API call 2, same model by default]
-  -> reject if near-solution / leak / low score
+  -> Dedup against resume set (batch)
   -> accept or retry
 ```
 

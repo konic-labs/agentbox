@@ -36,6 +36,35 @@ Assistant tool calls use nested `ToolCall` / `FunctionCall` with JSON-string
 Includes `steps`, `tool_calls`, `model_calls`, token counts (if available),
 `duration_s`, `sandbox_create_s`, `seed_s`, `verify_s`.
 
+## Official verifier vs agent self-tests
+
+Scoring uses the **task verifier** after the agent stops — not mid-rollout
+`run_tests` / ad-hoc `python -c` checks. `Rollout` stores ground-truth fields
+on `traj.metadata`:
+
+| Key | Meaning |
+| --- | --- |
+| `verify_command` | Official command run in the sandbox |
+| `verify_exit_code` | Process exit code |
+| `verify_success` | Bool: exit matches `success_exit_code` |
+| `verify_stdout` / `verify_stderr` | Truncated capture (for dashboards/debug) |
+| `verify_duration_s` | Verifier wall time |
+
+Agents may print “All tests passed!” on a different path or invented file while
+`verify_success` is still `false` (wrong module name, parallel test file, etc.).
+
+## HTML dashboard
+
+```bash
+agentbox traj show path/to/traj.json
+agentbox traj render bench-results/run1 -o traj-dash.html
+agentbox traj render bench-results/run1 --model-id my-model -o out.html
+```
+
+Library: `agentbox.trajectory.render.render_html(trajs, out_path)`. Pure HTML+CSS
+with official-verifier panel, agent self-check panel, and mismatch banner when
+they disagree.
+
 ## Recording
 
 `TrajectoryRecorder` is used by `Rollout` to accumulate messages, tool records,

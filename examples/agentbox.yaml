@@ -1,0 +1,35 @@
+# Example project config — copy to repo root as agentbox.yaml
+# Env interpolation: ${VAR}
+
+teacher:
+  model: /data/models/unsloth/Qwen3.6-27B-NVFP4
+  base_url: http://localhost:8000/v1
+  api_key: EMPTY
+  max_tokens: 8192
+  extra_body:
+    enable_thinking: false
+    chat_template_kwargs:
+      enable_thinking: false
+
+generate:
+  concurrency: 8
+  docker_concurrency: 8
+  llm_judge: true
+  min_score: 0.65
+  use_dspy: false
+  target: 20
+  max_tokens: 8192
+
+students:
+  - id: qwen-small-ollama
+    model: qwen3.5:0.8b
+    base_url: http://localhost:11434/v1
+    api_key: ollama
+  - id: qwen-27b-vllm
+    model: /data/models/unsloth/Qwen3.6-27B-NVFP4
+    base_url: http://localhost:8000/v1
+    api_key: EMPTY
+    extra_body:
+      enable_thinking: false
+      chat_template_kwargs:
+        enable_thinking: false

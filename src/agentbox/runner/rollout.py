@@ -214,6 +214,13 @@ class Rollout:
             else:
                 final_status = FinalStatus.FAILED
 
+            # Cap verify logs so trajectories stay portable (agent self-tests
+            # are separate; these fields are the official suite ground truth).
+            def _trunc(s: str, n: int = 16_384) -> str:
+                if len(s) <= n:
+                    return s
+                return s[:n] + f"\n...[truncated {len(s) - n} chars]"
+
             traj = recorder.finalize(
                 reward=reward,
                 final_status=final_status,
@@ -221,6 +228,10 @@ class Rollout:
                 metadata={
                     "verify_exit_code": verify_result.exit_code,
                     "verify_command": verify_result.command,
+                    "verify_success": verify_result.success,
+                    "verify_duration_s": verify_result.duration_s,
+                    "verify_stdout": _trunc(verify_result.stdout or ""),
+                    "verify_stderr": _trunc(verify_result.stderr or ""),
                     "stop_reason": loop_result.stop_reason,
                     "tools_available": registry.names(),
                 },
