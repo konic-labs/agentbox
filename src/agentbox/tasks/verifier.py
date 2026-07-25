@@ -30,14 +30,14 @@ class Verifier:
         self.manager = manager
 
     def build_command(self, spec: VerifierSpec) -> str:
-        if spec.type == VerifierType.PYTEST:
+        if spec.type in (VerifierType.PYTEST, VerifierType.TEST):
             if spec.command:
                 return spec.command
             path = spec.path or ""
             return f"python -m pytest -q {path}".strip()
-        if spec.type == VerifierType.COMMAND:
+        if spec.type in (VerifierType.COMMAND, VerifierType.SHELL):
             if not spec.command:
-                raise ValueError("verifier.command required for type=command")
+                raise ValueError("verifier.command required for type=command/shell")
             return spec.command
         if spec.command:
             return spec.command

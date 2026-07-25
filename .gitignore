@@ -49,3 +49,6 @@ out/
 # Docker
 .docker-cache/
 bench-results/
+
+# Pi agent artifacts
+.pi-subagents/

@@ -28,6 +28,8 @@ class VerifierType(str, Enum):
 
     PYTEST = "pytest"
     COMMAND = "command"
+    SHELL = "shell"  # Alias for command (used by teacher models)
+    TEST = "test"  # Alias for pytest (used by teacher models)
     CUSTOM = "custom"
 
 

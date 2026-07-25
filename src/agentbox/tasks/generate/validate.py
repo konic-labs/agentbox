@@ -68,7 +68,20 @@ def parse_task_from_prediction(
     if not isinstance(verifier_raw, dict):
         raise ValueError("verifier_json must be a JSON object")
     if "type" in verifier_raw and isinstance(verifier_raw["type"], str):
-        verifier_raw["type"] = VerifierType(verifier_raw["type"])
+        try:
+            verifier_raw["type"] = VerifierType(verifier_raw["type"])
+        except ValueError:
+            # Map unknown types intelligently
+            raw_type = verifier_raw["type"].lower()
+            if raw_type in ("pytest", "pytests", "test"):
+                verifier_raw["type"] = VerifierType.PYTEST
+            elif raw_type in ("unittest",):
+                verifier_raw["type"] = VerifierType.PYTEST
+            elif raw_type in ("shell", "bash", "sh"):
+                verifier_raw["type"] = VerifierType.COMMAND
+            else:
+                # Default to command with the raw verifier info
+                verifier_raw["type"] = VerifierType.COMMAND
     verifier = VerifierSpec.model_validate(verifier_raw)
 
     metadata = json.loads(metadata_json or "{}")
