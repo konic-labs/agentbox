@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agentbox"
-version = "0.2.0"
+name = "agentbox-rl"
+version = "0.2.1"
 description = "Fully local agentic virtual environment for trajectory building"
 readme = "README.md"
 license = "Apache-2.0"
@@ -47,8 +47,8 @@ dev = [
 agentbox = "agentbox.cli.main:app"
 
 [project.urls]
-Homepage = "https://github.com/agentbox/agentbox"
-Documentation = "https://github.com/agentbox/agentbox#readme"
+Homepage = "https://github.com/konic-labs/agentbox"
+Documentation = "https://github.com/konic-labs/agentbox#readme"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentbox"]

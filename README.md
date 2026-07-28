@@ -19,10 +19,14 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![Runtime](https://img.shields.io/badge/Runtime-Docker%20%7C%20AsyncIO-black)
 ![ART](https://img.shields.io/badge/ART-native-orange)
-![Package](https://img.shields.io/badge/Package-agentbox-green)
+![PyPI](https://img.shields.io/pypi/v/agentbox-rl?label=PyPI&color=blue)
 ![License](https://img.shields.io/badge/License-Apache%202.0-green)
 
 </div>
+
+```bash
+pip install agentbox-rl
+```
 
 AgentBox is an **ART-native** environment + rollout harness: isolated Docker
 sandboxes, structured tools (or pure shell), task seeding, verifiers, and
@@ -55,6 +59,19 @@ owns the virtual env and trajectory collection.
 daemon running, optional [`uv`](https://github.com/astral-sh/uv).
 
 ```bash
+# Install from PyPI
+pip install agentbox-rl
+
+# Or install from source
+pip install agentbox-rl[dev]
+
+# For optional features:
+pip install agentbox-rl[rich]     # progress bars
+pip install agentbox-rl[art]      # live art.Trajectory
+pip install agentbox-rl[generate] # DSPy task generation
+pip install agentbox-rl[all]      # everything
+
+# Development install from source
 git clone https://github.com/konic-labs/agentbox.git
 cd agentbox
 uv venv .venv --seed --python 3.12
@@ -250,7 +267,7 @@ AgentBox is built to drop into ART workflows:
 ```python
 traj.save("trajectories/run.json")
 art = traj.to_art_dict()   # ART-native: messages_and_choices, reward, metrics, metadata
-# uv pip install -e ".[art]"
+# pip install agentbox-rl[art]
 # live = traj.to_art()     # openpipe-art Trajectory object
 ```
 
