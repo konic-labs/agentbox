@@ -12,8 +12,11 @@ import re
 from typing import Any
 
 _TRAILING_COMMA = re.compile(r",\s*([}\]])")
-_PY_LITERALS = ((re.compile(r"\bTrue\b"), "true"), (re.compile(r"\bFalse\b"), "false"),
-                (re.compile(r"\bNone\b"), "null"))
+_PY_LITERALS = (
+    (re.compile(r"\bTrue\b"), "true"),
+    (re.compile(r"\bFalse\b"), "false"),
+    (re.compile(r"\bNone\b"), "null"),
+)
 
 
 def _escape_controls_in_strings(text: str) -> str:

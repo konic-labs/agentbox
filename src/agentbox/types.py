@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class ToolMode(str, Enum):
+class ToolMode(StrEnum):
     """How tools are selected for an agent rollout."""
 
     STRUCTURED = "structured"  # file + shell builtins (stable set, benchmark default)
@@ -14,7 +14,7 @@ class ToolMode(str, Enum):
     CUSTOM = "custom"  # no builtins unless listed; use custom_tools / name list
 
 
-class FinalStatus(str, Enum):
+class FinalStatus(StrEnum):
     """Terminal status of a rollout."""
 
     SUCCESS = "success"
@@ -24,7 +24,7 @@ class FinalStatus(str, Enum):
     MAX_STEPS = "max_steps"
 
 
-class StopReason(str, Enum):
+class StopReason(StrEnum):
     """Why the agent loop stopped."""
 
     FINAL_ANSWER = "final_answer"  # assistant replied without tool calls
@@ -35,7 +35,7 @@ class StopReason(str, Enum):
     ERROR = "error"
 
 
-class FailureKind(str, Enum):
+class FailureKind(StrEnum):
     """Who is responsible for a non-successful rollout.
 
     Only ``none`` and ``policy`` outcomes are valid RL training signal; the other
@@ -56,7 +56,7 @@ class FailureKind(str, Enum):
         return self not in (FailureKind.NONE, FailureKind.POLICY)
 
 
-class VerifierType(str, Enum):
+class VerifierType(StrEnum):
     """How success is measured after the agent finishes."""
 
     PYTEST = "pytest"
@@ -66,7 +66,7 @@ class VerifierType(str, Enum):
     CUSTOM = "custom"
 
 
-class MessageRole(str, Enum):
+class MessageRole(StrEnum):
     """OpenAI chat message roles."""
 
     SYSTEM = "system"

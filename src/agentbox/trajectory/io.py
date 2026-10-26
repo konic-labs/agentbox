@@ -32,7 +32,8 @@ class TrajectorySink(Protocol):
 
 def _open_text(path: Path, mode: str) -> IO[str]:
     if path.suffix == ".gz":
-        return io.TextIOWrapper(gzip.open(path, mode.replace("t", "") + "b"), encoding="utf-8")
+        raw = gzip.GzipFile(path, mode.replace("t", "").replace("b", "") + "b")
+        return io.TextIOWrapper(raw, encoding="utf-8")
     return path.open(mode, encoding="utf-8")
 
 

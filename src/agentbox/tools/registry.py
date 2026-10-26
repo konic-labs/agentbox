@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import random
 from collections.abc import Iterable, Sequence
 from typing import Any
@@ -31,11 +32,11 @@ class ToolRegistry:
     def get(self, name: str) -> BaseTool | None:
         return self._tools.get(name)
 
-    def list(self) -> list[BaseTool]:
-        return list(self._tools.values())
+    def list(self) -> builtins.list[BaseTool]:
+        return builtins.list(self._tools.values())
 
-    def names(self) -> list[str]:
-        return list(self._tools.keys())
+    def names(self) -> builtins.list[str]:
+        return builtins.list(self._tools.keys())
 
     def __contains__(self, name: object) -> bool:
         return name in self._tools
@@ -43,7 +44,7 @@ class ToolRegistry:
     def __len__(self) -> int:
         return len(self._tools)
 
-    def openai_tools(self) -> list[dict[str, Any]]:
+    def openai_tools(self) -> builtins.list[dict[str, Any]]:
         """Schemas, built once and cached until the registry changes."""
         if self._schemas is None:
             self._schemas = [t.openai_schema() for t in self._tools.values()]

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -55,10 +54,21 @@ async def test_env_reset_step_evaluate_trajectory() -> None:
     async with AgentBoxEnv(sandbox=SANDBOX, agent=AgentConfig(max_steps=5)) as env:
         obs = await env.reset(TASK)
         assert obs.messages[0]["role"] == "system" and obs.tools
-        res = await env.step({"content": None, "tool_calls": [{
-            "id": "c1", "type": "function",
-            "function": {"name": "write_file", "arguments": json.dumps({"path": "calc.py", "content": FIX})},
-        }]})
+        res = await env.step(
+            {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {
+                            "name": "write_file",
+                            "arguments": json.dumps({"path": "calc.py", "content": FIX}),
+                        },
+                    }
+                ],
+            }
+        )
         assert not res.done and res.messages[0]["role"] == "tool"
         res = await env.step('<tool_call>{"name": "run_tests", "arguments": {}}</tool_call>')
         assert "1 passed" in res.messages[0]["content"]
@@ -79,7 +89,9 @@ async def test_env_provision_failure_is_attributed() -> None:
 
 
 def test_trl_environment_factory_sync() -> None:
-    Env = make_environment_factory([TASK], sandbox=SANDBOX, tools=["read_file", "write_file", "run_tests"])
+    Env = make_environment_factory(
+        [TASK], sandbox=SANDBOX, tools=["read_file", "write_file", "run_tests"]
+    )
     env = Env()
     assert {"read_file", "write_file", "run_tests"} <= set(dir(env))
     assert not hasattr(env, "run_command")
@@ -129,14 +141,20 @@ async def test_openrlhf_episode_with_real_tokenizer() -> None:
     class Engine:
         async def generate(self, prompt_ids: list[int], sp: Any) -> Any:
             text = next(script)
-            ids = tok.encode(text, add_special_tokens=False) + [tok.convert_tokens_to_ids("<|im_end|>")]
+            ids = tok.encode(text, add_special_tokens=False) + [
+                tok.convert_tokens_to_ids("<|im_end|>")
+            ]
             lps = [{t: SimpleNamespace(logprob=-0.2)} for t in ids]
-            return SimpleNamespace(outputs=[SimpleNamespace(token_ids=ids, text=text, logprobs=lps,
-                                                            finish_reason="stop")])
+            return SimpleNamespace(
+                outputs=[
+                    SimpleNamespace(token_ids=ids, text=text, logprobs=lps, finish_reason="stop")
+                ]
+            )
 
     sp = SimpleNamespace(max_tokens=256, temperature=1.0, logprobs=1)
-    out = await run_episode("p", TASK.model_dump_json(), sp, 8192, tok, Engine(),
-                            settings=Settings(sandbox=SANDBOX))
+    out = await run_episode(
+        "p", TASK.model_dump_json(), sp, 8192, tok, Engine(), settings=Settings(sandbox=SANDBOX)
+    )
     assert out["reward"] == 1.0
     obs = out["observation_tokens"]
     assert len(out["action_ranges"]) == 2

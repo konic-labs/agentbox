@@ -50,9 +50,7 @@ class GenerateConfig(BaseModel):
     validator_api_key: str | None = None
     sandbox: SandboxConfig = Field(
         default_factory=lambda: SandboxConfig(
-            limits=SandboxConfig().limits.model_copy(
-                update={"network_disabled": False}
-            ),
+            limits=SandboxConfig().limits.model_copy(update={"network_disabled": False}),
             ensure_pytest=True,
         )
     )
@@ -192,17 +190,13 @@ class TaskGenerator:
                     )
                     if not static.ok:
                         last_error = "; ".join(static.errors) or "static QC failed"
-                        logger.warning(
-                            "generate attempt %d static QC: %s", attempt + 1, last_error
-                        )
+                        logger.warning("generate attempt %d static QC: %s", attempt + 1, last_error)
                         continue
 
                 report = await self.validate_task(task, domain=domain)
                 if not report.ok:
                     last_error = "; ".join(report.errors) or "validation failed"
-                    logger.warning(
-                        "generate attempt %d failed QC: %s", attempt + 1, last_error
-                    )
+                    logger.warning("generate attempt %d failed QC: %s", attempt + 1, last_error)
                     continue
                 # attach judge metadata for provenance
                 if report.llm_score is not None:
@@ -214,9 +208,7 @@ class TaskGenerator:
                 )
 
                 task.metadata["signature_hash"] = task_signature_hash(task)
-                task.metadata.update(
-                    {k: v for k, v in difficulty_heuristic(task).items()}
-                )
+                task.metadata.update({k: v for k, v in difficulty_heuristic(task).items()})
                 # Drop golden solution from shipped task unless explicitly kept.
                 # Only strip after Docker QC consumed it; batch mode disables Docker
                 # here and needs solution_files for its own golden-pass stage.
@@ -278,12 +270,8 @@ class TaskGenerator:
 
         reports: list[ValidationReport] = []
         solution_files = None
-        if task.metadata.get("has_hidden_solution") and task.metadata.get(
-            "solution_files"
-        ):
-            solution_files = {
-                str(k): str(v) for k, v in task.metadata["solution_files"].items()
-            }
+        if task.metadata.get("has_hidden_solution") and task.metadata.get("solution_files"):
+            solution_files = {str(k): str(v) for k, v in task.metadata["solution_files"].items()}
 
         if self.config.validate_in_docker:
             docker_report = await validate_task_live(
@@ -354,9 +342,7 @@ class TaskGenerator:
             task = await self._generate_openai_json(difficulty, domain, constraints)
         return task
 
-    async def _generate_two_stage(
-        self, difficulty: str, domain: str, constraints: str
-    ) -> Task:
+    async def _generate_two_stage(self, difficulty: str, domain: str, constraints: str) -> Task:
         """Generate golden solution+tests, then AST-strip solution → stubs."""
         from agentbox.tasks.generate.strip_impl import strip_impl_files
 
@@ -364,8 +350,7 @@ class TaskGenerator:
         task = await self._generate_openai_json(
             difficulty,
             domain,
-            (constraints or "")
-            + " TWO_STAGE=1: include solution_files (full correct impl) AND "
+            (constraints or "") + " TWO_STAGE=1: include solution_files (full correct impl) AND "
             "starter will be derived by stripping. Put full impl under solution_files "
             "key in JSON; starter_files may equal solution or be omitted for non-tests.",
             two_stage=True,
@@ -374,14 +359,10 @@ class TaskGenerator:
         if not isinstance(solution, dict) or not solution:
             # Fall back: treat non-test starter as solution and strip
             solution = {
-                p: c
-                for p, c in (task.starter_files or {}).items()
-                if "test" not in str(p).lower()
+                p: c for p, c in (task.starter_files or {}).items() if "test" not in str(p).lower()
             }
             tests = {
-                p: c
-                for p, c in (task.starter_files or {}).items()
-                if "test" in str(p).lower()
+                p: c for p, c in (task.starter_files or {}).items() if "test" in str(p).lower()
             }
             if not solution:
                 raise ValueError("two-stage generation produced no solution_files")
@@ -390,19 +371,13 @@ class TaskGenerator:
         else:
             solution = {str(k): str(v) for k, v in solution.items()}
             tests = {
-                p: c
-                for p, c in (task.starter_files or {}).items()
-                if "test" in str(p).lower()
+                p: c for p, c in (task.starter_files or {}).items() if "test" in str(p).lower()
             }
             # Keep test files from starter; strip solution → starter sources
             stripped = strip_impl_files(solution)
             # If teacher also put tests only in solution_files, pull them out
-            sol_tests = {
-                p: c for p, c in solution.items() if "test" in str(p).lower()
-            }
-            sol_src = {
-                p: c for p, c in solution.items() if "test" not in str(p).lower()
-            }
+            sol_tests = {p: c for p, c in solution.items() if "test" in str(p).lower()}
+            sol_src = {p: c for p, c in solution.items() if "test" not in str(p).lower()}
             if sol_tests and not tests:
                 tests = sol_tests
             if sol_src:
@@ -421,15 +396,15 @@ class TaskGenerator:
             task.metadata["_solution_ephemeral"] = True
         return task
 
-    async def _generate_dspy(
-        self, difficulty: str, domain: str, constraints: str
-    ) -> Task:
+    async def _generate_dspy(self, difficulty: str, domain: str, constraints: str) -> Task:
         import asyncio
 
         import dspy
 
         module = self._dspy_module
         lm = self._dspy_lm
+        if module is None:
+            raise RuntimeError("DSPy generator module is not initialised")
 
         def _run() -> Any:
             if lm is not None:
@@ -474,9 +449,10 @@ class TaskGenerator:
                 "starter_files (object path->content; include ALL test_*.py files here; "
                 "non-test sources may mirror solution or be omitted), "
                 "setup_commands (array of strings), "
-                "verifier (object with type='pytest' or 'command', plus command/success_exit_code), "
+                "verifier (object with type='pytest' or 'command', "
+                "plus command/success_exit_code), "
                 "metadata (object with difficulty, tags, estimated_steps, language). "
-                "JSON rules: escape newlines as \\n, escape quotes as \\\", no trailing commas. "
+                'JSON rules: escape newlines as \\n, escape quotes as \\", no trailing commas. '
                 "Description states API/behavior only — no spoilers. "
                 "solution_files must make pytest pass; tests must be thorough (>=3 asserts). "
                 "Prefer Python + pytest. Name exact file paths consistently."
@@ -494,9 +470,10 @@ class TaskGenerator:
                 "Keys: task_id (string), description (string), "
                 "starter_files (object mapping path string -> file content string), "
                 "setup_commands (array of strings), "
-                "verifier (object with type='pytest' or 'command', plus command/success_exit_code), "
+                "verifier (object with type='pytest' or 'command', "
+                "plus command/success_exit_code), "
                 "metadata (object with difficulty, tags, estimated_steps, language). "
-                "JSON rules: escape all newlines in strings as \\n, escape quotes as \\\", "
+                'JSON rules: escape all newlines in strings as \\n, escape quotes as \\", '
                 "no trailing commas, no raw control characters inside strings. "
                 "CRITICAL: starter_files must be stubs (signatures + raise NotImplementedError). "
                 "Do NOT ship near-complete solutions or # BUG spoilers. "
@@ -534,7 +511,9 @@ class TaskGenerator:
         msg = resp.choices[0].message
         content = (msg.content or "").strip()
         if not content:
-            reasoning = getattr(msg, "reasoning_content", None) or getattr(msg, "reasoning", None) or ""
+            reasoning = (
+                getattr(msg, "reasoning_content", None) or getattr(msg, "reasoning", None) or ""
+            )
             if isinstance(reasoning, str) and reasoning.strip():
                 content = reasoning.strip()
         data = _parse_json_object(content)
@@ -637,7 +616,7 @@ def _parse_json_object(text: str) -> dict[str, Any]:
 
     # Optional json_repair dependency
     try:
-        from json_repair import repair_json  # type: ignore
+        from json_repair import repair_json
 
         data = repair_json(candidates[-1], return_objects=True)
         if isinstance(data, dict):

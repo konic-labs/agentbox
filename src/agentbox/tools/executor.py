@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import json
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -117,8 +116,11 @@ class ToolExecutor:
         if tool is None:
             available = ", ".join(self.registry.names()) or "(none)"
             return self._outcome(
-                tc, step, f"ERROR: unknown tool {name!r}. Available tools: {available}",
-                is_error=True, args=None,
+                tc,
+                step,
+                f"ERROR: unknown tool {name!r}. Available tools: {available}",
+                is_error=True,
+                args=None,
             )
         args, err = parse_arguments(tc.function.arguments)
         if err is not None or args is None:
@@ -129,9 +131,11 @@ class ToolExecutor:
         missing = [r for r in required if r not in args]
         if missing:
             return self._outcome(
-                tc, step,
+                tc,
+                step,
                 f"ERROR: {name} is missing required argument(s): {', '.join(missing)}",
-                is_error=True, args=args,
+                is_error=True,
+                args=args,
             )
         deadline = deadline if deadline is not None else ctx.deadline
         budget = self.tool_timeout_s
@@ -139,8 +143,11 @@ class ToolExecutor:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return self._outcome(
-                    tc, step, "ERROR: episode time limit reached; tool call not executed",
-                    is_error=True, args=args,
+                    tc,
+                    step,
+                    "ERROR: episode time limit reached; tool call not executed",
+                    is_error=True,
+                    args=args,
                 )
             budget = min(budget, remaining)
         call_ctx = dataclasses.replace(
@@ -157,30 +164,53 @@ class ToolExecutor:
             )
         except TimeoutError:
             return self._outcome(
-                tc, step, f"ERROR: {name} timed out after {budget:.0f}s",
-                is_error=True, args=args, duration_s=time.monotonic() - t0,
+                tc,
+                step,
+                f"ERROR: {name} timed out after {budget:.0f}s",
+                is_error=True,
+                args=args,
+                duration_s=time.monotonic() - t0,
             )
         except TypeError as exc:
             return self._outcome(
-                tc, step, f"ERROR: invalid arguments for {name}: {exc}",
-                is_error=True, args=args, duration_s=time.monotonic() - t0,
+                tc,
+                step,
+                f"ERROR: invalid arguments for {name}: {exc}",
+                is_error=True,
+                args=args,
+                duration_s=time.monotonic() - t0,
             )
         except Exception as exc:
             return self._outcome(
-                tc, step, f"ERROR: {name} failed: {exc}",
-                is_error=True, args=args, duration_s=time.monotonic() - t0,
+                tc,
+                step,
+                f"ERROR: {name} failed: {exc}",
+                is_error=True,
+                args=args,
+                duration_s=time.monotonic() - t0,
             )
         finally:
             _CURRENT.reset(token)
         duration = time.monotonic() - t0
         if isinstance(result, ToolResult):
             return self._outcome(
-                tc, step, result.content, is_error=result.is_error, args=args,
-                duration_s=duration, terminal=result.terminal or tool.terminal, meta=result.meta,
+                tc,
+                step,
+                result.content,
+                is_error=result.is_error,
+                args=args,
+                duration_s=duration,
+                terminal=result.terminal or tool.terminal,
+                meta=result.meta,
             )
         return self._outcome(
-            tc, step, str(result), is_error=False, args=args,
-            duration_s=duration, terminal=tool.terminal,
+            tc,
+            step,
+            str(result),
+            is_error=False,
+            args=args,
+            duration_s=duration,
+            terminal=tool.terminal,
         )
 
     def _is_read_only(self, tc: ToolCall) -> bool:
@@ -204,8 +234,11 @@ class ToolExecutor:
                 for tc in tool_calls[i:]:
                     outcomes.append(
                         self._outcome(
-                            tc, ctx.step, "Skipped: the episode was already submitted.",
-                            is_error=True, args=None,
+                            tc,
+                            ctx.step,
+                            "Skipped: the episode was already submitted.",
+                            is_error=True,
+                            args=None,
                         )
                     )
                 break

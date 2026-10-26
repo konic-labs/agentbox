@@ -8,9 +8,8 @@ from pathlib import Path
 
 from agentbox.benchmark.schema import BenchmarkSuite, BenchmarkSuiteManifest
 from agentbox.config import AgentConfig, SandboxConfig
-from agentbox.errors import BenchmarkError, TaskValidationError
+from agentbox.errors import BenchmarkError
 from agentbox.tasks.bulk import load_task_dataset
-from agentbox.tasks.schema import Task
 from agentbox.types import ToolMode
 
 

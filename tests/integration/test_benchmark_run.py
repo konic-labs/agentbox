@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import json
-import uuid
 
 import pytest
 
 from agentbox.benchmark.loader import create_suite_from_tasks
-from agentbox.benchmark.runner import BenchmarkRunner
-from agentbox.benchmark.schema import BenchmarkRunConfig, ModelUnderTest
 from agentbox.config import ModelConfig, ResourceLimits, SandboxConfig
 from agentbox.model.base import ModelResponse
 from agentbox.model.mock import MockModelClient
@@ -44,8 +41,7 @@ async def test_benchmark_mock_success(tmp_path) -> None:
         starter_files={
             "fizzbuzz.py": "def fizzbuzz(n):\n    return str(n)\n",
             "test_fizzbuzz.py": (
-                "from fizzbuzz import fizzbuzz\n\n"
-                "def test_3():\n    assert fizzbuzz(3) == 'Fizz'\n"
+                "from fizzbuzz import fizzbuzz\n\ndef test_3():\n    assert fizzbuzz(3) == 'Fizz'\n"
             ),
         },
         setup_commands=["pip install -q pytest"],
@@ -74,12 +70,7 @@ async def test_benchmark_mock_success(tmp_path) -> None:
     ]
     suite = suite.freeze()
 
-    fixed = (
-        "def fizzbuzz(n):\n"
-        "    if n % 3 == 0:\n"
-        "        return 'Fizz'\n"
-        "    return str(n)\n"
-    )
+    fixed = "def fizzbuzz(n):\n    if n % 3 == 0:\n        return 'Fizz'\n    return str(n)\n"
     mock = MockModelClient(
         [
             ModelResponse(
@@ -89,9 +80,7 @@ async def test_benchmark_mock_success(tmp_path) -> None:
                         id="c1",
                         function=FunctionCall(
                             name="write_file",
-                            arguments=json.dumps(
-                                {"path": "fizzbuzz.py", "content": fixed}
-                            ),
+                            arguments=json.dumps({"path": "fizzbuzz.py", "content": fixed}),
                         ),
                     )
                 ],
@@ -102,12 +91,11 @@ async def test_benchmark_mock_success(tmp_path) -> None:
     )
 
     # Run via ParallelRunner path used by benchmark but inject mock
-    from agentbox.benchmark.report import build_leaderboard, build_model_report
-    from agentbox.benchmark.schema import BenchmarkReport
-    from agentbox.config import AgentConfig, RolloutConfig
-    from agentbox.runner.parallel import ParallelRunner
-    from datetime import datetime, timezone
     import time
+
+    from agentbox.benchmark.report import build_model_report
+    from agentbox.config import RolloutConfig
+    from agentbox.runner.parallel import ParallelRunner
 
     agent = suite.manifest.agent.model_copy(update={"custom_tools": []})
     runner = ParallelRunner(

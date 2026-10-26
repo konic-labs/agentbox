@@ -168,7 +168,14 @@ TOOL_METHODS: dict[str, Callable[..., str]] = {
     )
 }
 _MODE_TOOLS = {
-    ToolMode.STRUCTURED: ["list_files", "read_file", "write_file", "edit_file", "run_command", "run_tests"],
+    ToolMode.STRUCTURED: [
+        "list_files",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "run_command",
+        "run_tests",
+    ],
     ToolMode.EXTENDED: list(TOOL_METHODS),
     ToolMode.SHELL: ["run_command"],
 }

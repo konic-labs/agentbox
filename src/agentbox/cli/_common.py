@@ -88,7 +88,7 @@ def fail(message: str, *, code: int = EXIT_USAGE) -> NoReturn:
     raise typer.Exit(code)
 
 
-def emit(st: State, data: Any, human: Callable[[], None] | None = None) -> None:
+def emit(st: State, data: Any, human: Callable[[], object] | None = None) -> None:
     """JSON with ``--json``, otherwise the human renderer (or pretty JSON)."""
     if st.json or human is None:
         typer.echo(json.dumps(data, indent=None if st.json else 2, default=str))
@@ -96,7 +96,9 @@ def emit(st: State, data: Any, human: Callable[[], None] | None = None) -> None:
     human()
 
 
-def table(columns: Sequence[str], rows: Sequence[Sequence[Any]], *, title: str | None = None) -> None:
+def table(
+    columns: Sequence[str], rows: Sequence[Sequence[Any]], *, title: str | None = None
+) -> None:
     from rich.console import Console
     from rich.table import Table
 

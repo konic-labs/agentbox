@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -11,7 +11,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from agentbox.config import AgentConfig, ModelConfig, SandboxConfig
 from agentbox.metrics.aggregate import AggregateMetrics
 from agentbox.tasks.schema import Task
-from agentbox.trajectory.schema import Trajectory
 from agentbox.types import ToolMode
 
 
@@ -79,12 +78,10 @@ class BenchmarkSuite(BaseModel):
         return [t.task_id for t in self.tasks]
 
     def freeze(self) -> BenchmarkSuite:
-        from agentbox.benchmark.hash import compute_suite_content_hash
-
-        from agentbox.benchmark.hash import HASH_VERSION
+        from agentbox.benchmark.hash import HASH_VERSION, compute_suite_content_hash
 
         m = self.manifest.model_copy(deep=True)
-        m.created_at = m.created_at or datetime.now(timezone.utc)
+        m.created_at = m.created_at or datetime.now(UTC)
         m.content_hash = compute_suite_content_hash(self.tasks, m)
         m.hash_version = HASH_VERSION
         return BenchmarkSuite(root=self.root, manifest=m, tasks=list(self.tasks))

@@ -8,7 +8,6 @@ from typing import Any, Literal
 
 from agentbox.tasks.schema import Task
 
-
 Difficulty = Literal["easy", "medium", "hard"]
 
 
@@ -43,13 +42,9 @@ def filter_tasks(
         if language is not None and meta.get("language") != language:
             continue
         est = meta.get("estimated_steps")
-        if min_estimated_steps is not None and (
-            est is None or int(est) < min_estimated_steps
-        ):
+        if min_estimated_steps is not None and (est is None or int(est) < min_estimated_steps):
             continue
-        if max_estimated_steps is not None and (
-            est is None or int(est) > max_estimated_steps
-        ):
+        if max_estimated_steps is not None and (est is None or int(est) > max_estimated_steps):
             continue
         if tag_set is not None:
             task_tags = set(meta.get("tags") or [])

@@ -16,7 +16,7 @@ import logging
 import random
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from agentbox.agent.agent import Agent
@@ -27,8 +27,8 @@ from agentbox.model.base import ModelClient
 from agentbox.model.openai_compat import OpenAICompatClient
 from agentbox.rewards import RewardContext, compute_reward, default_reward_specs
 from agentbox.runner.provision import (
-    ProvisionError,
     Provisioned,
+    ProvisionError,
     effective_sandbox,
     manager_for,
     provision,
@@ -175,7 +175,9 @@ def loop_metrics(metrics: TrajectoryMetrics, loop: AgentLoopResult) -> None:
     metrics.model_latency_s = round(sum(m.latency_s or 0.0 for m in loop.messages), 4)
 
 
-def final_status_for(verify: VerifyResult, loop: AgentLoopResult) -> tuple[FinalStatus, FailureKind]:
+def final_status_for(
+    verify: VerifyResult, loop: AgentLoopResult
+) -> tuple[FinalStatus, FailureKind]:
     if verify.success:
         return FinalStatus.SUCCESS, FailureKind.NONE
     status = {
@@ -245,11 +247,13 @@ async def _run(
     hooks: AgentHooks | None,
 ) -> Trajectory:
     t_start = time.monotonic()
-    created_at = datetime.now(timezone.utc)
+    created_at = datetime.now(UTC)
     run_id = run_id or (config.run_id if config else None) or uuid.uuid4().hex
     rollout_id = rollout_id or uuid.uuid4().hex
-    run_sandbox = sandbox or (manager.config if manager else None) or (
-        config.sandbox if config else SandboxConfig()
+    run_sandbox = (
+        sandbox
+        or (manager.config if manager else None)
+        or (config.sandbox if config else SandboxConfig())
     )
     mgr = manager_for(task, run_sandbox, manager)
     sandbox_cfg = mgr.config
@@ -300,7 +304,7 @@ async def _run(
             metrics=metrics,
             metadata={**meta, **(extra or {})},
             error=error,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
 
     prov: Provisioned | None = None
@@ -318,7 +322,9 @@ async def _run(
         except ProvisionError as exc:
             logger.warning("provisioning %s failed (%s): %s", task.task_id, exc.kind.value, exc)
             outcome = FinalStatus.ERROR
-            return build(status=FinalStatus.ERROR, failure=exc.kind, error=str(exc), extra=exc.extra)
+            return build(
+                status=FinalStatus.ERROR, failure=exc.kind, error=str(exc), extra=exc.extra
+            )
         metrics.sandbox_create_s = prov.create_s
         metrics.seed_s = prov.seed_s
 
@@ -378,7 +384,11 @@ async def _run(
         )
         status, failure = final_status_for(verify_result, loop_result)
         outcome = status
-        extra = {"submitted_answer": loop_result.submitted_answer} if loop_result.submitted_answer else None
+        extra = (
+            {"submitted_answer": loop_result.submitted_answer}
+            if loop_result.submitted_answer
+            else None
+        )
         return build(
             status=status,
             failure=failure,

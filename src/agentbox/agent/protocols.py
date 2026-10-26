@@ -48,9 +48,13 @@ def _to_call(blob: str) -> ToolCall:
         data = loads_lenient(blob)
     except ValueError:
         # Surface the malformed call to the agent instead of dropping it.
-        return ToolCall(id=_new_id(), function=FunctionCall(name="invalid_tool_call", arguments=blob))
+        return ToolCall(
+            id=_new_id(), function=FunctionCall(name="invalid_tool_call", arguments=blob)
+        )
     if not isinstance(data, dict):
-        return ToolCall(id=_new_id(), function=FunctionCall(name="invalid_tool_call", arguments=blob))
+        return ToolCall(
+            id=_new_id(), function=FunctionCall(name="invalid_tool_call", arguments=blob)
+        )
     name = str(data.get("name") or data.get("function") or "invalid_tool_call")
     args = data.get("arguments", data.get("parameters", {}))
     arguments = args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)

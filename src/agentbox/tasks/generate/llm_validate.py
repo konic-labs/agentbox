@@ -118,9 +118,7 @@ async def validate_task_llm(
     """Run DSPy (or OpenAI JSON fallback) structured judge on a Task."""
     payload = task_payload_for_judge(task)
     difficulty = str(
-        (task.metadata or {}).get("difficulty")
-        or payload.get("difficulty")
-        or "unknown"
+        (task.metadata or {}).get("difficulty") or payload.get("difficulty") or "unknown"
     )
     claimed_domain = str((task.metadata or {}).get("language") or domain)
 
@@ -221,7 +219,9 @@ async def _validate_openai_json(
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        "temperature": min(model_config.temperature, 0.3),
+        "temperature": 0.3
+        if model_config.temperature is None
+        else min(model_config.temperature, 0.3),
         "max_tokens": model_config.max_tokens or 1024,
     }
     if model_config.extra_body:

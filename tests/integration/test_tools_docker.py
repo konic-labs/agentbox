@@ -53,7 +53,9 @@ async def test_search_files(sandbox) -> None:  # type: ignore[no-untyped-def]
 
 
 async def test_read_file_ranges(sandbox) -> None:  # type: ignore[no-untyped-def]
-    out = await ReadFileTool().execute(sandbox, path="notes.txt", offset=10, limit=3, line_numbers=True)
+    out = await ReadFileTool().execute(
+        sandbox, path="notes.txt", offset=10, limit=3, line_numbers=True
+    )
     assert "10\tline 10" in str(out) and "12\tline 12" in str(out)
     assert "[lines 10-12 of 100]" in str(out)
     err = await ReadFileTool().execute(sandbox, path="src")
@@ -65,7 +67,8 @@ async def test_apply_patch_real_sandbox(sandbox) -> None:  # type: ignore[no-unt
     out = await ApplyPatchTool().execute(sandbox, patch=patch)
     assert "M src/app.py" in str(out)
     res = await RunCommandTool().execute(
-        sandbox, command="python -c 'import sys; sys.path.insert(0, \"src\"); import app; print(app.add(2, 3))'"
+        sandbox,
+        command="python -c 'import sys; sys.path.insert(0, \"src\"); import app; print(app.add(2, 3))'",
     )
     assert "5" in str(res)
 

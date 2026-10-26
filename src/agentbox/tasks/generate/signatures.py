@@ -9,9 +9,7 @@ def get_generate_coding_task_signature() -> Any:
     try:
         import dspy
     except ImportError as exc:
-        raise ImportError(
-            "dspy is required. Install with: pip install agentbox[generate]"
-        ) from exc
+        raise ImportError("dspy is required. Install with: pip install agentbox[generate]") from exc
 
     class GenerateCodingTask(dspy.Signature):
         """Author a coding task for an agent in a Docker sandbox.
@@ -39,7 +37,7 @@ def get_generate_coding_task_signature() -> Any:
             desc="Instruction shown to the agent (no solution spoilers)"
         )
         starter_files_json: str = dspy.OutputField(
-            desc='JSON object path->content; stubs preferred, not near-solutions'
+            desc="JSON object path->content; stubs preferred, not near-solutions"
         )
         setup_commands_json: str = dspy.OutputField(
             desc='JSON list of shell commands, e.g. ["pip install -q pytest"]'
@@ -58,9 +56,7 @@ def get_validate_coding_task_signature() -> Any:
     try:
         import dspy
     except ImportError as exc:
-        raise ImportError(
-            "dspy is required. Install with: pip install agentbox[generate]"
-        ) from exc
+        raise ImportError("dspy is required. Install with: pip install agentbox[generate]") from exc
 
     class ValidateCodingTask(dspy.Signature):
         """Judge whether a coding task is suitable for agent training / benchmarks.
@@ -80,17 +76,13 @@ def get_validate_coding_task_signature() -> Any:
 
         task_id: str = dspy.InputField()
         description: str = dspy.InputField(desc="Agent-facing instruction")
-        starter_files_json: str = dspy.InputField(
-            desc="JSON object of path -> file content"
-        )
+        starter_files_json: str = dspy.InputField(desc="JSON object of path -> file content")
         setup_commands_json: str = dspy.InputField(desc="JSON list of setup commands")
         verifier_json: str = dspy.InputField(desc="JSON verifier spec")
         difficulty: str = dspy.InputField(desc="Claimed difficulty")
         claimed_domain: str = dspy.InputField(desc="Domain e.g. python")
 
-        accept: bool = dspy.OutputField(
-            desc="True only if the task is a good agent coding task"
-        )
+        accept: bool = dspy.OutputField(desc="True only if the task is a good agent coding task")
         score: float = dspy.OutputField(
             desc=(
                 "Quality score in buckets: 0.2=reject garbage, 0.4=weak/leaky, "
@@ -119,9 +111,7 @@ def get_generator_module() -> Any:
     try:
         import dspy
     except ImportError as exc:
-        raise ImportError(
-            "dspy is required. Install with: pip install agentbox[generate]"
-        ) from exc
+        raise ImportError("dspy is required. Install with: pip install agentbox[generate]") from exc
 
     Signature = get_generate_coding_task_signature()
 
@@ -144,9 +134,7 @@ def get_validator_module() -> Any:
     try:
         import dspy
     except ImportError as exc:
-        raise ImportError(
-            "dspy is required. Install with: pip install agentbox[generate]"
-        ) from exc
+        raise ImportError("dspy is required. Install with: pip install agentbox[generate]") from exc
 
     Signature = get_validate_coding_task_signature()
 

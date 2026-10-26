@@ -71,7 +71,7 @@ include = [
     "/src",
     "/tests",
     "/examples",
-    "/docker",
+    "/docs",
     "/README.md",
     "/LICENSE",
 ]
@@ -92,7 +92,43 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+[tool.ruff.lint.per-file-ignores]
+"src/agentbox/trajectory/render.py" = ["E501"]  # inline HTML/CSS template
+"src/agentbox/agent/protocols.py" = ["E501"]  # verbatim Hermes/Qwen prompt text
+"src/agentbox/cli/train.py" = ["E501"]  # script template
+"src/agentbox/integrations/openrlhf.py" = ["E501"]  # shell example in docstring
+"tests/**" = ["E501"]  # long literal test data
+
 [tool.mypy]
 python_version = "3.11"
 strict = true
 packages = ["agentbox"]
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+# optional integrations and libraries without type information
+module = [
+    "docker", "docker.*", "dspy", "dspy.*", "art", "art.*", "trl", "trl.*",
+    "verl", "verl.*", "openrlhf", "openrlhf.*", "skyrl_gym", "skyrl_gym.*",
+    "datasets", "datasets.*", "pyarrow", "pyarrow.*", "transformers", "transformers.*",
+    "fastapi", "fastapi.*", "uvicorn", "uvicorn.*", "peft", "peft.*", "json_repair",
+    "rich", "rich.*", "yaml", "tomli",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# human renderers are `lambda: (typer.echo(...), ...)` tuples
+module = ["agentbox.cli.*"]
+disable_error_code = ["func-returns-value"]
+
+[[tool.mypy.overrides]]
+# DSPy signatures/modules subclass untyped dspy classes
+module = ["agentbox.tasks.generate.signatures"]
+disallow_subclassing_any = false
+
+[[tool.mypy.overrides]]
+# TRL builds tool JSON schemas from these signatures: `self` must stay unannotated
+module = ["agentbox.integrations.trl"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+warn_return_any = false

@@ -30,7 +30,8 @@ class ValidationCache:
         if not p.exists():
             return None
         try:
-            return json.loads(p.read_text(encoding="utf-8"))
+            data: dict[str, Any] = json.loads(p.read_text(encoding="utf-8"))
+            return data
         except Exception:
             return None
 

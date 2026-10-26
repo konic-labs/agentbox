@@ -70,7 +70,9 @@ def load_settings(path: str | None = None) -> Settings:
     return Settings(
         sandbox=SandboxConfig.model_validate(data.get("sandbox", {})),
         agent=AgentConfig.model_validate(data.get("agent", {})),
-        rewards=[RewardSpec.model_validate(r) for r in data["rewards"]] if data.get("rewards") else None,
+        rewards=[RewardSpec.model_validate(r) for r in data["rewards"]]
+        if data.get("rewards")
+        else None,
     )
 
 
@@ -83,7 +85,9 @@ def task_from_kwargs(kwargs: dict[str, Any]) -> Task:
     extra = kwargs.get("extra_info") or {}
     blob = extra.get("agentbox_task")
     if blob:
-        return Task.model_validate_json(blob) if isinstance(blob, str) else Task.model_validate(blob)
+        return (
+            Task.model_validate_json(blob) if isinstance(blob, str) else Task.model_validate(blob)
+        )
     task_id = extra.get("task_id") or kwargs.get("task_id")
     source = os.environ.get("AGENTBOX_TASKS")
     if task_id and source:
@@ -106,7 +110,7 @@ def build_agent_loop_class(
 
         return ToolResponse(text=text)
 
-    class AgentBoxAgentLoop(base):  # type: ignore[misc, valid-type]
+    class AgentBoxAgentLoop(base):  # type: ignore[misc]
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             super().__init__(*args, **kwargs)
             self._agentbox = settings or load_settings()

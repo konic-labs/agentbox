@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ast
-from typing import Mapping
+from collections.abc import Mapping
 
 
 class _StubTransformer(ast.NodeTransformer):
@@ -15,9 +15,9 @@ class _StubTransformer(ast.NodeTransformer):
         if (
             isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             and node.body
-            and isinstance(node.body[0], ast.Expr)
-            and isinstance(getattr(node.body[0], "value", None), ast.Constant)
-            and isinstance(node.body[0].value.value, str)  # type: ignore[union-attr]
+            and isinstance(first := node.body[0], ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
         ):
             body.append(node.body[0])
         body.append(

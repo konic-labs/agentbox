@@ -14,11 +14,9 @@ from agentbox import Rollout, Task
 from agentbox.config import ResourceLimits, SandboxConfig
 from agentbox.model.base import ModelResponse
 from agentbox.model.mock import MockModelClient
-from agentbox.runner.parallel import ParallelRunner
 from agentbox.trajectory.schema import FunctionCall, ToolCall
 
-
-FIXED = '''def fizzbuzz(n):
+FIXED = """def fizzbuzz(n):
     if n % 15 == 0:
         return "FizzBuzz"
     if n % 3 == 0:
@@ -26,7 +24,7 @@ FIXED = '''def fizzbuzz(n):
     if n % 5 == 0:
         return "Buzz"
     return str(n)
-'''
+"""
 
 
 def make_mock() -> MockModelClient:
@@ -39,9 +37,7 @@ def make_mock() -> MockModelClient:
                         id="call_1",
                         function=FunctionCall(
                             name="write_file",
-                            arguments=json.dumps(
-                                {"path": "fizzbuzz.py", "content": FIXED}
-                            ),
+                            arguments=json.dumps({"path": "fizzbuzz.py", "content": FIXED}),
                         ),
                     )
                 ],
@@ -52,9 +48,7 @@ def make_mock() -> MockModelClient:
 
 
 async def main() -> None:
-    task = Task.from_json(
-        Path(__file__).parent / "tasks" / "fix_fizzbuzz" / "task.json"
-    )
+    task = Task.from_json(Path(__file__).parent / "tasks" / "fix_fizzbuzz" / "task.json")
     sandbox = SandboxConfig(
         limits=ResourceLimits(network_disabled=False),
         ensure_pytest=True,

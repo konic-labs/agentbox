@@ -85,11 +85,9 @@ def to_art_dict(
 
 def _art() -> Any:
     try:
-        import art  # type: ignore[import-untyped]
+        import art
     except ImportError as exc:
-        raise ImportError(
-            "openpipe-art is required: pip install 'agentbox-rl[art]'"
-        ) from exc
+        raise ImportError("openpipe-art is required: pip install 'agentbox-rl[art]'") from exc
     return art
 
 
@@ -106,9 +104,7 @@ def to_art_trajectory(traj: Trajectory) -> Any:
     )
 
 
-def to_art_groups(
-    trajectories: Iterable[Trajectory], *, trainable_only: bool = True
-) -> list[Any]:
+def to_art_groups(trajectories: Iterable[Trajectory], *, trainable_only: bool = True) -> list[Any]:
     """``art.TrajectoryGroup`` per ``group_id`` (infra failures dropped by default)."""
     art = _art()
     groups: dict[str, list[Trajectory]] = {}

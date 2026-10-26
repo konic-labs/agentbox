@@ -18,7 +18,9 @@ def test_leaderboard_order() -> None:
             metrics=TrajectoryMetrics(steps=2, duration_s=1.0),
         )
 
-    m1 = build_model_report("a", {"model": "a"}, [traj("t", True), traj("t", False)], wall_clock_s=1)
+    m1 = build_model_report(
+        "a", {"model": "a"}, [traj("t", True), traj("t", False)], wall_clock_s=1
+    )
     m2 = build_model_report("b", {"model": "b"}, [traj("t", True), traj("t", True)], wall_clock_s=1)
     board = build_leaderboard([m1, m2])
     assert board[0]["model_id"] == "b"

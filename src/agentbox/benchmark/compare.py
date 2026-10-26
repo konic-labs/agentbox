@@ -15,7 +15,7 @@ def _binom_two_sided(k: int, n: int) -> float:
         return 1.0
     k = min(k, n - k)
     tail = sum(math.comb(n, i) for i in range(k + 1)) / 2**n
-    return min(1.0, 2 * tail)
+    return float(min(1.0, 2 * tail))
 
 
 def paired_stats(
@@ -28,9 +28,7 @@ def paired_stats(
         return {"tasks": 0}
     mean = sum(diffs) / len(diffs)
     rng = random.Random(seed)
-    boots = sorted(
-        sum(rng.choice(diffs) for _ in diffs) / len(diffs) for _ in range(n_boot)
-    )
+    boots = sorted(sum(rng.choice(diffs) for _ in diffs) / len(diffs) for _ in range(n_boot))
     lo, hi = boots[int(0.025 * n_boot)], boots[min(n_boot - 1, int(0.975 * n_boot))]
     wins = sum(1 for d in diffs if d > 0)
     losses = sum(1 for d in diffs if d < 0)

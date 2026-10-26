@@ -38,8 +38,7 @@ async def test_mock_fizzbuzz_rollout() -> None:
         starter_files={
             "fizzbuzz.py": "def fizzbuzz(n):\n    return str(n)\n",
             "test_fizzbuzz.py": (
-                "from fizzbuzz import fizzbuzz\n\n"
-                "def test_3():\n    assert fizzbuzz(3) == 'Fizz'\n"
+                "from fizzbuzz import fizzbuzz\n\ndef test_3():\n    assert fizzbuzz(3) == 'Fizz'\n"
             ),
         },
         setup_commands=["pip install -q pytest"],
@@ -49,12 +48,7 @@ async def test_mock_fizzbuzz_rollout() -> None:
             timeout_s=60,
         ),
     )
-    fixed = (
-        "def fizzbuzz(n):\n"
-        "    if n % 3 == 0:\n"
-        "        return 'Fizz'\n"
-        "    return str(n)\n"
-    )
+    fixed = "def fizzbuzz(n):\n    if n % 3 == 0:\n        return 'Fizz'\n    return str(n)\n"
     mock = MockModelClient(
         [
             ModelResponse(
@@ -64,9 +58,7 @@ async def test_mock_fizzbuzz_rollout() -> None:
                         id="call_1",
                         function=FunctionCall(
                             name="write_file",
-                            arguments=json.dumps(
-                                {"path": "fizzbuzz.py", "content": fixed}
-                            ),
+                            arguments=json.dumps({"path": "fizzbuzz.py", "content": fixed}),
                         ),
                     )
                 ],

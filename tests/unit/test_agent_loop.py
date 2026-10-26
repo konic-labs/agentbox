@@ -8,8 +8,6 @@ import time
 from types import SimpleNamespace
 from typing import Any
 
-import pytest
-
 from agentbox.agent.loop import AgentLoop
 from agentbox.config import AgentConfig
 from agentbox.errors import ContextLengthError, ModelError
@@ -95,7 +93,9 @@ def roles(result: Any) -> list[str]:
 
 
 async def test_parallel_read_only_calls_keep_order() -> None:
-    result = await run_loop([turn(call("c1", "read_file", path="a.txt"), call("c2", "list_files")), done()])
+    result = await run_loop(
+        [turn(call("c1", "read_file", path="a.txt"), call("c2", "list_files")), done()]
+    )
     assert result.stop_reason == "final_answer"
     assert result.steps == 1
     tool_ids = [m.tool_call_id for m in result.messages if m.tool_call_id]

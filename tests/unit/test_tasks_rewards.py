@@ -10,9 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from agentbox.config import AgentConfig
 from agentbox.errors import TaskValidationError
 from agentbox.rewards import RewardContext, RewardSpec, compute_reward, default_reward_specs
-from agentbox.config import AgentConfig
 from agentbox.tasks.loader import iter_tasks, load_task
 from agentbox.tasks.schema import Task, VerifierSpec
 from agentbox.tasks.verifier import parse_junit, parse_pytest_summary, parse_stdout_reward
@@ -20,13 +20,18 @@ from agentbox.types import VerifierType
 
 
 def _task(tid: str = "t", **kw: object) -> Task:
-    return Task(task_id=tid, description="desc", verifier=VerifierSpec(type=VerifierType.PYTEST), **kw)  # type: ignore[arg-type]
+    return Task(
+        task_id=tid, description="desc", verifier=VerifierSpec(type=VerifierType.PYTEST), **kw
+    )  # type: ignore[arg-type]
 
 
 def test_verifier_spec_normalisation_and_validation() -> None:
     assert VerifierSpec(type=VerifierType.SHELL, command="true").type == VerifierType.COMMAND
     assert VerifierSpec(type=VerifierType.TEST).type == VerifierType.PYTEST
-    assert VerifierSpec(type=VerifierType.COMMAND, command="x", parse_stdout=True).reward_mode == "stdout"
+    assert (
+        VerifierSpec(type=VerifierType.COMMAND, command="x", parse_stdout=True).reward_mode
+        == "stdout"
+    )
     with pytest.raises(ValueError):
         VerifierSpec(type=VerifierType.CUSTOM)
     with pytest.raises(ValueError):
@@ -40,7 +45,10 @@ def test_parsers() -> None:
     assert parse_junit(xml) == {"tests": 4, "failures": 1, "errors": 1, "skipped": 1}
     assert parse_junit(b"<not-xml") is None
     assert parse_pytest_summary("....\n2 failed, 3 passed, 1 skipped in 0.1s") == {
-        "tests": 6, "failures": 2, "errors": 0, "skipped": 1
+        "tests": 6,
+        "failures": 2,
+        "errors": 0,
+        "skipped": 1,
     }
     assert parse_pytest_summary("no summary") is None
     assert parse_stdout_reward("log\n0.75\n") == (0.75, {})
@@ -81,9 +89,17 @@ def test_iter_tasks_mixed_sources(tmp_path: Path) -> None:
 
 async def test_compute_reward_components() -> None:
     verify = SimpleNamespace(reward=1.0, success=True, tests_total=4, tests_passed=3, tampered=[])
-    records = [SimpleNamespace(is_error=True, result="ERROR: unknown tool 'x'"), SimpleNamespace(is_error=False, result="ok")]
-    loop = SimpleNamespace(steps=5, stop_reason="submitted", tool_call_records=records,
-                           usage_totals={"completion_tokens": 1000}, messages=[])
+    records = [
+        SimpleNamespace(is_error=True, result="ERROR: unknown tool 'x'"),
+        SimpleNamespace(is_error=False, result="ok"),
+    ]
+    loop = SimpleNamespace(
+        steps=5,
+        stop_reason="submitted",
+        tool_call_records=records,
+        usage_totals={"completion_tokens": 1000},
+        messages=[],
+    )
     ctx = RewardContext(task=_task(), verify=verify, loop=loop)  # type: ignore[arg-type]
     total, parts = await compute_reward(
         [
@@ -108,7 +124,9 @@ async def test_compute_reward_components() -> None:
 
 async def test_dotted_path_reward_and_defaults() -> None:
     ctx = RewardContext(task=_task(), verify=None, loop=None)
-    total, parts = await compute_reward([RewardSpec(name="tests.unit.test_tasks_rewards:_const_reward")], ctx)
+    total, parts = await compute_reward(
+        [RewardSpec(name="tests.unit.test_tasks_rewards:_const_reward")], ctx
+    )
     assert total == 0.5 and "tests.unit.test_tasks_rewards:_const_reward" in parts
     specs = default_reward_specs(AgentConfig(step_penalty=0.1, timeout_penalty=0.2))
     assert [s.name for s in specs] == ["verifier", "step_penalty", "timeout_penalty"]

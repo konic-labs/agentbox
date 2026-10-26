@@ -7,13 +7,15 @@ import json
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any
 
 import typer
 
 from agentbox.cli._common import EXIT_FAILURES, EXIT_OK, emit, fail, fmt_pct, state, table
 
-traj_app = typer.Typer(help="Inspect, curate, replay and export trajectories.", no_args_is_help=True)
+traj_app = typer.Typer(
+    help="Inspect, curate, replay and export trajectories.", no_args_is_help=True
+)
 
 
 def _role(m: Any) -> str:
@@ -31,7 +33,9 @@ def conversation_errors(traj: Any) -> list[str]:
         role = _role(m)
         if role == "assistant":
             if pending:
-                errors.append(f"message {i}: assistant turn before tool results for {sorted(pending)}")
+                errors.append(
+                    f"message {i}: assistant turn before tool results for {sorted(pending)}"
+                )
                 pending.clear()
             for tc in m.tool_calls or []:
                 if tc.id in pending:
@@ -69,17 +73,24 @@ def traj_show(ctx: typer.Context, path: Annotated[Path, typer.Argument()]) -> No
         }
 
         def human(t: Any = t, data: dict[str, Any] = data) -> None:
-            typer.echo(f"{t.task_id} [{t.rollout_id[:8]}] {data['status']} reward={t.reward:.3f} "
-                       f"steps={t.metrics.steps} tools={t.metrics.tool_calls} ({data['failure_kind']})")
+            typer.echo(
+                f"{t.task_id} [{t.rollout_id[:8]}] {data['status']} reward={t.reward:.3f} "
+                f"steps={t.metrics.steps} tools={t.metrics.tool_calls} ({data['failure_kind']})"
+            )
             if t.verify:
-                typer.echo(f"verify: {t.verify.command!r} exit={t.verify.exit_code} "
-                           f"success={t.verify.success} tests={t.verify.tests_passed}/{t.verify.tests_total}")
+                typer.echo(
+                    f"verify: {t.verify.command!r} exit={t.verify.exit_code} "
+                    f"success={t.verify.success} "
+                    f"tests={t.verify.tests_passed}/{t.verify.tests_total}"
+                )
                 if t.verify.stdout:
                     typer.echo("--- verify stdout (tail) ---\n" + t.verify.stdout[-1200:])
             if t.error:
                 typer.secho(f"error: {t.error}", fg=typer.colors.RED)
             for r in t.tool_call_records[-6:]:
-                typer.echo(f"  step {r.step} {r.name}{' ERR' if r.is_error else ''} ({r.duration_s:.2f}s)")
+                typer.echo(
+                    f"  step {r.step} {r.name}{' ERR' if r.is_error else ''} ({r.duration_s:.2f}s)"
+                )
 
         emit(st, data, human)
         break
@@ -106,14 +117,28 @@ def traj_stats(
         if t.is_trainable:
             groups.setdefault(t.group_id or t.task_id, []).append(t.reward)
     m = acc.result()
-    data = {**m.model_dump(exclude={"by_task"}), "tools": dict(tools.most_common()),
-            "groups": group_stats(list(groups.values()))}
+    data = {
+        **m.model_dump(exclude={"by_task"}),
+        "tools": dict(tools.most_common()),
+        "groups": group_stats(list(groups.values())),
+    }
     st = state(ctx)
 
     def human() -> None:
-        table(["n", "success", "mean reward", "reward std", "mean steps", "tool err rate", "infra"],
-              [[m.n, fmt_pct(m.success_rate), f"{m.mean_reward:.3f}", f"{m.reward_std:.3f}",
-                f"{m.mean_steps:.1f}", fmt_pct(m.tool_error_rate), m.infra_failures]])
+        table(
+            ["n", "success", "mean reward", "reward std", "mean steps", "tool err rate", "infra"],
+            [
+                [
+                    m.n,
+                    fmt_pct(m.success_rate),
+                    f"{m.mean_reward:.3f}",
+                    f"{m.reward_std:.3f}",
+                    f"{m.mean_steps:.1f}",
+                    fmt_pct(m.tool_error_rate),
+                    m.infra_failures,
+                ]
+            ],
+        )
         typer.echo(f"statuses: {m.by_status}")
         typer.echo(f"failure kinds: {m.by_failure_kind}")
         typer.echo(f"tools: {dict(tools.most_common(10))}")
@@ -127,13 +152,13 @@ def traj_filter(
     ctx: typer.Context,
     sources: Annotated[list[Path], typer.Argument()],
     out: Annotated[Path, typer.Option("--out", "-o", help="Output .jsonl[.gz]")],
-    status: Annotated[Optional[list[str]], typer.Option("--status")] = None,
-    min_reward: Annotated[Optional[float], typer.Option("--min-reward")] = None,
-    max_reward: Annotated[Optional[float], typer.Option("--max-reward")] = None,
-    max_steps: Annotated[Optional[int], typer.Option("--max-steps")] = None,
-    tool: Annotated[Optional[list[str]], typer.Option("--tool", help="Must use this tool")] = None,
-    failure_kind: Annotated[Optional[list[str]], typer.Option("--failure-kind")] = None,
-    grep: Annotated[Optional[str], typer.Option("--grep", help="Regex over message contents")] = None,
+    status: Annotated[list[str] | None, typer.Option("--status")] = None,
+    min_reward: Annotated[float | None, typer.Option("--min-reward")] = None,
+    max_reward: Annotated[float | None, typer.Option("--max-reward")] = None,
+    max_steps: Annotated[int | None, typer.Option("--max-steps")] = None,
+    tool: Annotated[list[str] | None, typer.Option("--tool", help="Must use this tool")] = None,
+    failure_kind: Annotated[list[str] | None, typer.Option("--failure-kind")] = None,
+    grep: Annotated[str | None, typer.Option("--grep", help="Regex over message contents")] = None,
     trainable_only: Annotated[bool, typer.Option("--trainable-only")] = False,
 ) -> None:
     """Write the trajectories matching all filters to a JSONL file."""
@@ -156,7 +181,10 @@ def traj_filter(
                 continue
             if tool and not set(tool) <= {r.name for r in t.tool_call_records}:
                 continue
-            if failure_kind and str(getattr(t.failure_kind, "value", t.failure_kind)) not in failure_kind:
+            if (
+                failure_kind
+                and str(getattr(t.failure_kind, "value", t.failure_kind)) not in failure_kind
+            ):
                 continue
             if trainable_only and not t.is_trainable:
                 continue
@@ -166,8 +194,11 @@ def traj_filter(
             yield t
 
     write_jsonl(keep(), out)
-    emit(state(ctx), {"read": read, "kept": kept, "out": str(out)},
-         lambda: typer.echo(f"kept {kept}/{read} → {out}"))
+    emit(
+        state(ctx),
+        {"read": read, "kept": kept, "out": str(out)},
+        lambda: typer.echo(f"kept {kept}/{read} → {out}"),
+    )
 
 
 @traj_app.command("validate")
@@ -182,10 +213,17 @@ def traj_validate(ctx: typer.Context, sources: Annotated[list[Path], typer.Argum
         errs = conversation_errors(t)
         if errs:
             problems[t.rollout_id or t.run_id] = errs
-    emit(state(ctx), {"n": n, "invalid": len(problems), "problems": problems}, lambda: (
-        typer.secho(f"{n - len(problems)}/{n} valid", fg=typer.colors.GREEN if not problems else typer.colors.RED),
-        [typer.echo(f"  {k}: {v[0]}") for k, v in list(problems.items())[:20]],
-    ))
+    emit(
+        state(ctx),
+        {"n": n, "invalid": len(problems), "problems": problems},
+        lambda: (
+            typer.secho(
+                f"{n - len(problems)}/{n} valid",
+                fg=typer.colors.GREEN if not problems else typer.colors.RED,
+            ),
+            [typer.echo(f"  {k}: {v[0]}") for k, v in list(problems.items())[:20]],
+        ),
+    )
     raise typer.Exit(EXIT_FAILURES if problems else EXIT_OK)
 
 
@@ -212,18 +250,32 @@ def traj_replay(
     )
     if original.tool_mode and original.tool_mode in ("structured", "extended", "shell", "custom"):
         agent = agent.model_copy(update={"tools": original.tool_mode})
-    replayed = asyncio.run(Rollout.run(
-        t, model=ReplayModelClient(original), agent=agent, sandbox=st.project.sandbox or SandboxConfig()
-    ))
-    same = replayed.final_status == original.final_status and abs(replayed.reward - original.reward) < 1e-9
-    data = {"original": {"status": original.final_status.value, "reward": original.reward},
-            "replayed": {"status": replayed.final_status.value, "reward": replayed.reward},
-            "reproduced": same}
-    emit(st, data, lambda: typer.secho(
-        f"original {data['original']} · replayed {data['replayed']} · "
-        f"{'REPRODUCED' if same else 'DIFFERENT'}",
-        fg=typer.colors.GREEN if same else typer.colors.YELLOW,
-    ))
+    replayed = asyncio.run(
+        Rollout.run(
+            t,
+            model=ReplayModelClient(original),
+            agent=agent,
+            sandbox=st.project.sandbox or SandboxConfig(),
+        )
+    )
+    same = (
+        replayed.final_status == original.final_status
+        and abs(replayed.reward - original.reward) < 1e-9
+    )
+    data = {
+        "original": {"status": original.final_status.value, "reward": original.reward},
+        "replayed": {"status": replayed.final_status.value, "reward": replayed.reward},
+        "reproduced": same,
+    }
+    emit(
+        st,
+        data,
+        lambda: typer.secho(
+            f"original {data['original']} · replayed {data['replayed']} · "
+            f"{'REPRODUCED' if same else 'DIFFERENT'}",
+            fg=typer.colors.GREEN if same else typer.colors.YELLOW,
+        ),
+    )
     raise typer.Exit(EXIT_OK if same else EXIT_FAILURES)
 
 
@@ -232,7 +284,7 @@ def traj_render(
     ctx: typer.Context,
     source: Annotated[Path, typer.Argument(help="Trajectory file, dir, JSONL or bench run")],
     out: Annotated[Path, typer.Option("--out", "-o")] = Path("traj-dash.html"),
-    model_id: Annotated[Optional[str], typer.Option("--model-id")] = None,
+    model_id: Annotated[str | None, typer.Option("--model-id")] = None,
     limit: Annotated[int, typer.Option("--limit", help="Max trajectories rendered")] = 500,
 ) -> None:
     """Render a self-contained HTML dashboard."""
@@ -253,23 +305,32 @@ def traj_render(
                 report = None
             break
     path = render_html(trajs, out, title=f"AgentBox Trajectories ({len(trajs)})", report=report)
-    emit(state(ctx), {"out": str(path), "n": len(trajs)},
-         lambda: typer.echo(f"wrote {path} ({path.stat().st_size // 1024} KB, {len(trajs)} trajectories)"))
+    emit(
+        state(ctx),
+        {"out": str(path), "n": len(trajs)},
+        lambda: typer.echo(
+            f"wrote {path} ({path.stat().st_size // 1024} KB, {len(trajs)} trajectories)"
+        ),
+    )
 
 
 @traj_app.command("export")
 def traj_export(
     ctx: typer.Context,
     source: Annotated[Path, typer.Argument(help="Trajectories (file/dir/JSONL/bench run)")],
-    fmt: Annotated[str, typer.Option("--format", "-f", help="chat|dpo|grpo|tokens|hf|sharegpt|art")] = "chat",
+    fmt: Annotated[
+        str, typer.Option("--format", "-f", help="chat|dpo|grpo|tokens|hf|sharegpt|art")
+    ] = "chat",
     out: Annotated[Path, typer.Option("--out", "-o")] = Path("export.jsonl"),
     successful_only: Annotated[bool, typer.Option("--successful-only")] = False,
-    min_reward: Annotated[Optional[float], typer.Option("--min-reward")] = None,
-    include_infra: Annotated[bool, typer.Option("--include-infra", help="Keep infra failures")] = False,
+    min_reward: Annotated[float | None, typer.Option("--min-reward")] = None,
+    include_infra: Annotated[
+        bool, typer.Option("--include-infra", help="Keep infra failures")
+    ] = False,
     per_turn: Annotated[bool, typer.Option("--per-turn", help="tokens: one row per turn")] = False,
     drop_zero_variance: Annotated[bool, typer.Option("--drop-zero-variance", help="grpo")] = False,
     min_margin: Annotated[float, typer.Option("--min-margin", help="dpo")] = 0.5,
-    push_to_hub: Annotated[Optional[str], typer.Option("--push-to-hub", help="hf: repo id")] = None,
+    push_to_hub: Annotated[str | None, typer.Option("--push-to-hub", help="hf: repo id")] = None,
 ) -> None:
     """Export a training dataset in a trainer-friendly format."""
     from agentbox.export import ExportFilter, available_formats, export
@@ -289,10 +350,17 @@ def traj_export(
         min_margin=min_margin,
         push_to_hub=push_to_hub,
     )
-    emit(state(ctx), stats.model_dump(), lambda: (
-        typer.echo(f"{stats.format}: {stats.rows} rows from {stats.kept}/{stats.read} trajectories → {out}"),
-        [typer.echo(f"note: {n}") for n in stats.notes],
-    ))
+    emit(
+        state(ctx),
+        stats.model_dump(),
+        lambda: (
+            typer.echo(
+                f"{stats.format}: {stats.rows} rows from "
+                f"{stats.kept}/{stats.read} trajectories → {out}"
+            ),
+            [typer.echo(f"note: {n}") for n in stats.notes],
+        ),
+    )
 
 
 @traj_app.command("diff")

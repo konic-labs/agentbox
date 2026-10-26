@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-from agentbox.tasks.generate.strip_impl import strip_impl_files
 from agentbox.tasks.generate.static_qc import validate_task_static
+from agentbox.tasks.generate.strip_impl import strip_impl_files
 from agentbox.tasks.schema import Task, VerifierSpec
 from agentbox.types import VerifierType
 
 
 def test_two_stage_strip_passes_static() -> None:
     solution = {
-        "parser.py": (
-            "def parse(s):\n"
-            "    '''Parse.'''\n"
-            "    return s.strip().split(',')\n"
-        ),
+        "parser.py": ("def parse(s):\n    '''Parse.'''\n    return s.strip().split(',')\n"),
         "test_parser.py": (
             "from parser import parse\n"
             "def test_a():\n    assert parse('a,b')==['a','b']\n"

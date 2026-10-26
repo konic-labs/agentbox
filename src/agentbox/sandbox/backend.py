@@ -37,9 +37,9 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any, TypeVar
 
-import docker
 from docker.errors import APIError, DockerException, ImageNotFound, NotFound
 
+import docker
 from agentbox.errors import DockerNotAvailableError, ImageNotFoundError, SandboxError
 from agentbox.sandbox.types import ExecResult, ImageProfile
 
@@ -56,8 +56,9 @@ _GO_MODE_DIR = 1 << 31
 _GO_MODE_SYMLINK = 1 << 27
 
 _KILL_SCRIPT = (
-    'for d in /proc/[0-9]*; do '
-    'if grep -qs "{marker}" "$d/environ" 2>/dev/null; then kill -9 "${{d#/proc/}}" 2>/dev/null; fi; '
+    "for d in /proc/[0-9]*; do "
+    'if grep -qs "{marker}" "$d/environ" 2>/dev/null; '
+    'then kill -9 "${{d#/proc/}}" 2>/dev/null; fi; '
     "done; true"
 )
 
@@ -527,7 +528,9 @@ class DockerBackend:
 
         def last_used(img: dict[str, Any]) -> float:
             tags = img.get("RepoTags") or []
-            return max([self._cache_used.get(t, 0.0) for t in tags] + [float(img.get("Created", 0))])
+            return max(
+                [self._cache_used.get(t, 0.0) for t in tags] + [float(img.get("Created", 0))]
+            )
 
         for img in sorted(images, key=last_used)[: len(images) - max_images]:
             tags = img.get("RepoTags") or []

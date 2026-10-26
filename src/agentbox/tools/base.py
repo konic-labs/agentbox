@@ -85,5 +85,5 @@ class BaseTool(ABC):
         }
 
     @abstractmethod
-    async def execute(self, sandbox: Any, **kwargs: Any) -> str | ToolResult:
-        """Run tool I/O via the sandbox only."""
+    async def execute(self, sandbox: Any, *args: Any, **kwargs: Any) -> str | ToolResult:
+        """Run tool I/O via the sandbox only (arguments arrive as keywords)."""

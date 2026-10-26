@@ -114,7 +114,6 @@ async def validate_task_live(
     When ``solution_files`` is provided (two-stage gen), also inject the golden
     solution and require the verifier to pass (starter must still fail first).
     """
-    errors: list[str] = []
     warnings: list[str] = []
     cfg = sandbox_config or SandboxConfig(
         limits=SandboxConfig().limits.model_copy(update={"network_disabled": False}),
@@ -137,9 +136,7 @@ async def validate_task_live(
         verifier_runs = True
         fails_on_starter = not verify.success
         if expect_fail_on_starter and verify.success:
-            warnings.append(
-                "verifier already passes on starter files (task may have no work)"
-            )
+            warnings.append("verifier already passes on starter files (task may have no work)")
             return ValidationReport(
                 ok=False,
                 task=task,
@@ -167,8 +164,7 @@ async def validate_task_live(
                     ok=False,
                     task=task,
                     errors=[
-                        "golden solution does not pass verifier "
-                        f"(exit={verify_sol.exit_code})"
+                        f"golden solution does not pass verifier (exit={verify_sol.exit_code})"
                     ],
                     warnings=warnings,
                     seed_ok=True,

@@ -21,7 +21,9 @@ def _http(status: int) -> httpx.Response:
 
 
 def _resp(content: str = "ok", **choice_extra: Any) -> Any:
-    message = SimpleNamespace(content=content, tool_calls=None, **choice_extra.pop("message_extra", {}))
+    message = SimpleNamespace(
+        content=content, tool_calls=None, **choice_extra.pop("message_extra", {})
+    )
     choice = SimpleNamespace(message=message, finish_reason="stop", logprobs=None, **choice_extra)
     usage = SimpleNamespace(prompt_tokens=10, completion_tokens=2, total_tokens=12)
     return SimpleNamespace(choices=[choice], usage=usage)
@@ -118,7 +120,9 @@ async def test_context_length_shrinks_max_tokens_once() -> None:
 
 
 async def test_context_length_without_room_raises() -> None:
-    msg = "This model's maximum context length is 8192 tokens and your request has 8190 input tokens"
+    msg = (
+        "This model's maximum context length is 8192 tokens and your request has 8190 input tokens"
+    )
     c, _ = client_with([openai.BadRequestError(msg, response=_http(400), body=None)])
     with pytest.raises(ContextLengthError):
         await c.complete([])
@@ -164,7 +168,9 @@ async def test_replay_client_returns_recorded_turns() -> None:
         Message(
             role="assistant",
             content=None,
-            tool_calls=[ToolCall(id="c1", function=FunctionCall(name="list_files", arguments="{}"))],
+            tool_calls=[
+                ToolCall(id="c1", function=FunctionCall(name="list_files", arguments="{}"))
+            ],
         ),
         Message(role="tool", content="x", tool_call_id="c1"),
         Message(role="assistant", content="done"),

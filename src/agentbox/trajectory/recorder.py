@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from agentbox.tasks.schema import Task
@@ -33,7 +33,7 @@ class TrajectoryRecorder:
         self.messages: list[Message] = []
         self.tool_call_records: list[ToolCallRecord] = []
         self.metrics = TrajectoryMetrics()
-        self.created_at = datetime.now(timezone.utc)
+        self.created_at = datetime.now(UTC)
 
     def set_messages(self, messages: list[Message]) -> None:
         self.messages = list(messages)
@@ -54,7 +54,7 @@ class TrajectoryRecorder:
         error: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> Trajectory:
-        finished = datetime.now(timezone.utc)
+        finished = datetime.now(UTC)
         if not self.metrics.duration_s:
             self.metrics.duration_s = (finished - self.created_at).total_seconds()
         meta = {"task_metadata": self.task.metadata, **(metadata or {})}

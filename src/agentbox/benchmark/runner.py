@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -50,7 +50,7 @@ class BenchmarkRunner:
         if not (cfg.resume and (out / "suite_snapshot").exists()):
             snapshot_suite(suite, out / "suite_snapshot")
 
-        started = datetime.now(timezone.utc)
+        started = datetime.now(UTC)
         model_reports = []
         for mut in cfg.models:
             logger.info("benchmark model_id=%s start", mut.model_id)
@@ -63,7 +63,7 @@ class BenchmarkRunner:
             suite_content_hash=suite.manifest.content_hash,
             agentbox_version=__version__,
             started_at=started,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
             run_tags=dict(cfg.tags),
             models=model_reports,
             leaderboard=build_leaderboard(model_reports),

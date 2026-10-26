@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Iterable
-from typing import Mapping
 
 from agentbox.tasks.schema import Task
 
@@ -82,7 +81,7 @@ def difficulty_heuristic(task: Task) -> dict[str, float | int | str]:
     n_files = len(files)
     multi = n_files >= 3
     stateful = 0
-    for path, body in files.items():
+    for _path, body in files.items():
         b = str(body).lower()
         n_assert += len(re.findall(r"\bassert\b", b))
         n_assert += len(re.findall(r"pytest\.raises", b))

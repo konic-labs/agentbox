@@ -30,8 +30,12 @@ def _task(tid: str, impl: str, tests: str) -> Task:
 
 
 def test_signature_hash_stable() -> None:
-    t1 = _task("a", "def foo():\n    raise NotImplementedError\n", "def test_a():\n    assert True\n")
-    t2 = _task("b", "def foo():\n    raise NotImplementedError\n", "def test_a():\n    assert True\n")
+    t1 = _task(
+        "a", "def foo():\n    raise NotImplementedError\n", "def test_a():\n    assert True\n"
+    )
+    t2 = _task(
+        "b", "def foo():\n    raise NotImplementedError\n", "def test_a():\n    assert True\n"
+    )
     assert task_signature_hash(t1) == task_signature_hash(t2)
 
 
@@ -62,15 +66,19 @@ def test_difficulty_heuristic() -> None:
 
 
 def test_review_queue_roundtrip(tmp_path: Path) -> None:
-    t = _task("r1", "def foo():\n    raise NotImplementedError\n", "def test_a():\n    assert True\n")
+    t = _task(
+        "r1", "def foo():\n    raise NotImplementedError\n", "def test_a():\n    assert True\n"
+    )
     item = queue_item_from_task(t, path="r1.json", score=0.7)
     qpath = tmp_path / "queue.jsonl"
     export_review_queue([item], qpath)
     assert qpath.exists()
     dpath = tmp_path / "decisions.jsonl"
     dpath.write_text(
-        ReviewDecision(task_id="r1", decision="accept").model_dump_json() + "\n"
-        + ReviewDecision(task_id="r2", decision="reject").model_dump_json() + "\n",
+        ReviewDecision(task_id="r1", decision="accept").model_dump_json()
+        + "\n"
+        + ReviewDecision(task_id="r2", decision="reject").model_dump_json()
+        + "\n",
         encoding="utf-8",
     )
     dec = load_review_decisions(dpath)

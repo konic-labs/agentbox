@@ -11,7 +11,6 @@ from agentbox.config import ResourceLimits, SandboxConfig
 from agentbox.metrics import aggregate_trajectories
 from agentbox.model.base import ModelResponse
 from agentbox.model.mock import MockModelClient
-from agentbox.runner.parallel import ParallelRunner
 from agentbox.trajectory.formats.jsonl import export_jsonl
 from agentbox.trajectory.schema import FunctionCall, ToolCall
 
@@ -38,7 +37,7 @@ def _mock_that_writes(path: str, content: str) -> MockModelClient:
 
 async def main() -> None:
     task = Task.from_json(Path(__file__).parent / "tasks" / "fix_fizzbuzz" / "task.json")
-    fixed = '''def fizzbuzz(n):
+    fixed = """def fizzbuzz(n):
     if n % 15 == 0:
         return "FizzBuzz"
     if n % 3 == 0:
@@ -46,7 +45,7 @@ async def main() -> None:
     if n % 5 == 0:
         return "Buzz"
     return str(n)
-'''
+"""
     # Note: each rollout needs its own mock scripted client — use a factory via
     # simple shared client that always returns same script (stateful idx resets per client).
     # For demo, run with one mock client that has enough scripted responses for 1 rollout;

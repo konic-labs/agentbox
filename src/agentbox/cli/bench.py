@@ -5,13 +5,24 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any
 
 import typer
 
-from agentbox.cli._common import EXIT_FAILURES, EXIT_INFRA, EXIT_OK, emit, fail, fmt_pct, state, table
+from agentbox.cli._common import (
+    EXIT_FAILURES,
+    EXIT_INFRA,
+    EXIT_OK,
+    emit,
+    fail,
+    fmt_pct,
+    state,
+    table,
+)
 
-bench_app = typer.Typer(help="Create, freeze, run and compare benchmark suites.", no_args_is_help=True)
+bench_app = typer.Typer(
+    help="Create, freeze, run and compare benchmark suites.", no_args_is_help=True
+)
 
 
 @bench_app.command("create")
@@ -42,16 +53,28 @@ def bench_create(
         description=description,
         concurrency=concurrency,
         n_per_task=n,
-        sandbox=base.model_copy(update={"limits": base.limits.model_copy(update={"network_disabled": not network})})
+        sandbox=base.model_copy(
+            update={"limits": base.limits.model_copy(update={"network_disabled": not network})}
+        )
         if base.limits
         else SandboxConfig(limits=ResourceLimits(network_disabled=not network)),
         freeze=True,
     )
     m = suite.manifest
-    emit(st, {"suite_id": m.suite_id, "version": m.version, "tasks": len(suite.tasks),
-              "hash": m.content_hash, "path": str(dest.resolve())},
-         lambda: typer.echo(f"created {m.suite_id} v{m.version} ({len(suite.tasks)} tasks) "
-                            f"hash={m.content_hash} → {dest.resolve()}"))
+    emit(
+        st,
+        {
+            "suite_id": m.suite_id,
+            "version": m.version,
+            "tasks": len(suite.tasks),
+            "hash": m.content_hash,
+            "path": str(dest.resolve()),
+        },
+        lambda: typer.echo(
+            f"created {m.suite_id} v{m.version} ({len(suite.tasks)} tasks) "
+            f"hash={m.content_hash} → {dest.resolve()}"
+        ),
+    )
 
 
 @bench_app.command("freeze")
@@ -61,8 +84,11 @@ def bench_freeze(ctx: typer.Context, suite_dir: Annotated[Path, typer.Argument()
 
     suite = load_suite(suite_dir).freeze()
     save_suite(suite, suite_dir)
-    emit(state(ctx), {"hash": suite.manifest.content_hash},
-         lambda: typer.echo(f"frozen hash={suite.manifest.content_hash}"))
+    emit(
+        state(ctx),
+        {"hash": suite.manifest.content_hash},
+        lambda: typer.echo(f"frozen hash={suite.manifest.content_hash}"),
+    )
 
 
 @bench_app.command("validate")
@@ -81,10 +107,15 @@ def bench_validate(
         ok = suite.verify_integrity(strict=strict)
     except SuiteIntegrityError as exc:
         fail(str(exc), code=EXIT_FAILURES)
-    emit(st, {"suite_id": suite.manifest.suite_id, "tasks": len(suite.tasks), "integrity": ok},
-         lambda: typer.secho(f"{suite.manifest.suite_id}: {len(suite.tasks)} tasks · integrity "
-                             f"{'ok' if ok else 'MISMATCH'}",
-                             fg=typer.colors.GREEN if ok else typer.colors.RED))
+    emit(
+        st,
+        {"suite_id": suite.manifest.suite_id, "tasks": len(suite.tasks), "integrity": ok},
+        lambda: typer.secho(
+            f"{suite.manifest.suite_id}: {len(suite.tasks)} tasks · integrity "
+            f"{'ok' if ok else 'MISMATCH'}",
+            fg=typer.colors.GREEN if ok else typer.colors.RED,
+        ),
+    )
     raise typer.Exit(EXIT_OK if ok else EXIT_FAILURES)
 
 
@@ -100,10 +131,17 @@ def _students(specs: list[str], api_key_env: str | None) -> list[Any]:
             raise typer.BadParameter(f"invalid --student {spec!r}; expected id=model@base_url")
         mid, rest = spec.split("=", 1)
         model_name, burl = rest.rsplit("@", 1)
-        out.append(ModelUnderTest(model_id=mid, model=ModelConfig(
-            model=model_name, base_url=burl, api_key_env=api_key_env,
-            api_key=os.environ.get(api_key_env) if api_key_env else None,
-        )))
+        out.append(
+            ModelUnderTest(
+                model_id=mid,
+                model=ModelConfig(
+                    model=model_name,
+                    base_url=burl,
+                    api_key_env=api_key_env,
+                    api_key=os.environ.get(api_key_env) if api_key_env else None,
+                ),
+            )
+        )
     return out
 
 
@@ -133,23 +171,29 @@ def bench_run(
     ctx: typer.Context,
     suite_dir: Annotated[Path, typer.Argument()],
     out: Annotated[Path, typer.Option("--out", "-o")] = Path("bench-results/latest"),
-    model: Annotated[Optional[str], typer.Option("--model", "-m")] = None,
-    model_id: Annotated[Optional[str], typer.Option("--model-id")] = None,
-    base_url: Annotated[Optional[str], typer.Option("--base-url")] = None,
-    api_key_env: Annotated[Optional[str], typer.Option("--api-key-env")] = None,
-    profile: Annotated[Optional[list[str]], typer.Option("--profile", help="Model profile(s) to run")] = None,
-    student: Annotated[Optional[list[str]], typer.Option("--student", help="id=MODEL@BASE_URL")] = None,
-    models_file: Annotated[Optional[Path], typer.Option("--models-file")] = None,
+    model: Annotated[str | None, typer.Option("--model", "-m")] = None,
+    model_id: Annotated[str | None, typer.Option("--model-id")] = None,
+    base_url: Annotated[str | None, typer.Option("--base-url")] = None,
+    api_key_env: Annotated[str | None, typer.Option("--api-key-env")] = None,
+    profile: Annotated[
+        list[str] | None, typer.Option("--profile", help="Model profile(s) to run")
+    ] = None,
+    student: Annotated[
+        list[str] | None, typer.Option("--student", help="id=MODEL@BASE_URL")
+    ] = None,
+    models_file: Annotated[Path | None, typer.Option("--models-file")] = None,
     mock: Annotated[bool, typer.Option("--mock", help="No-op model (pipeline smoke test)")] = False,
-    concurrency: Annotated[Optional[int], typer.Option("--concurrency", "-c")] = None,
-    n: Annotated[Optional[int], typer.Option("--n")] = None,
-    limit: Annotated[Optional[int], typer.Option("--limit")] = None,
+    concurrency: Annotated[int | None, typer.Option("--concurrency", "-c")] = None,
+    n: Annotated[int | None, typer.Option("--n")] = None,
+    limit: Annotated[int | None, typer.Option("--limit")] = None,
     resume: Annotated[bool, typer.Option("--resume")] = False,
     fail_fast: Annotated[bool, typer.Option("--fail-fast")] = False,
     strict: Annotated[bool, typer.Option("--strict", help="Fail on integrity mismatch")] = False,
     probe: Annotated[bool, typer.Option("--probe", help="Probe tool calling first")] = False,
-    save_trajectories: Annotated[bool, typer.Option("--save-trajectories/--no-save-trajectories")] = True,
-    min_success_rate: Annotated[Optional[float], typer.Option("--min-success-rate")] = None,
+    save_trajectories: Annotated[
+        bool, typer.Option("--save-trajectories/--no-save-trajectories")
+    ] = True,
+    min_success_rate: Annotated[float | None, typer.Option("--min-success-rate")] = None,
     progress: Annotated[bool, typer.Option("--progress/--no-progress")] = True,
 ) -> None:
     """Run a suite against one or more OpenAI-compatible models."""
@@ -177,17 +221,30 @@ def bench_run(
         if student:
             models.extend(_students(student, api_key_env))
         for p in profile or []:
-            models.append(ModelUnderTest(model_id=p, model=resolve_model(
-                st, model=None, base_url=None, api_key_env=None, profile=p)))
+            models.append(
+                ModelUnderTest(
+                    model_id=p,
+                    model=resolve_model(st, model=None, base_url=None, api_key_env=None, profile=p),
+                )
+            )
         if model:
             cfg = resolve_model(st, model=model, base_url=base_url, api_key_env=api_key_env)
-            models.append(ModelUnderTest(
-                model_id=model_id or model.replace("/", "-").replace(":", "-"), model=cfg))
+            models.append(
+                ModelUnderTest(
+                    model_id=model_id or model.replace("/", "-").replace(":", "-"), model=cfg
+                )
+            )
         if not models and st.project.all_models():
-            models = [ModelUnderTest(model_id=k, model=v.to_model_config())
-                      for k, v in st.project.all_models().items() if k != "teacher"]
+            models = [
+                ModelUnderTest(model_id=k, model=v.to_model_config())
+                for k, v in st.project.all_models().items()
+                if k != "teacher"
+            ]
     if not models:
-        fail("provide --model / --profile / --student / --models-file / --mock or models in agentbox.yaml")
+        fail(
+            "provide --model / --profile / --student / --models-file / --mock "
+            "or models in agentbox.yaml"
+        )
 
     if probe and not mock:
         from agentbox.model.probe import format_probe_results, probe_endpoint
@@ -198,30 +255,43 @@ def bench_run(
             if any(not r.ok for r in results):
                 fail(f"probe failed for {mut.model_id}", code=EXIT_INFRA)
 
-    report = asyncio.run(BenchmarkRunner(
-        BenchmarkRunConfig(
-            suite=suite,
-            models=models,
-            concurrency=concurrency,
-            n_per_task=n,
-            save_trajectories=save_trajectories,
-            output_dir=out,
-            strict_integrity=strict,
-            fail_fast=fail_fast,
-            resume=resume,
-            progress=progress and not st.json and not st.quiet,
-            tags={"agentbox": __version__},
-        ),
-        model_clients=clients,
-    ).run())
+    report = asyncio.run(
+        BenchmarkRunner(
+            BenchmarkRunConfig(
+                suite=suite,
+                models=models,
+                concurrency=concurrency,
+                n_per_task=n,
+                save_trajectories=save_trajectories,
+                output_dir=out,
+                strict_integrity=strict,
+                fail_fast=fail_fast,
+                resume=resume,
+                progress=progress and not st.json and not st.quiet,
+                tags={"agentbox": __version__},
+            ),
+            model_clients=clients,
+        ).run()
+    )
 
     def human() -> None:
         ks = sorted({k for r in report.leaderboard for k in r if k.startswith("pass@")})
-        table(["model", "success", *ks, "mean reward", "mean steps", "infra", "n"],
-              [[r["model_id"], fmt_pct(r["success_rate"]), *[fmt_pct(r.get(k)) for k in ks],
-                f"{r['mean_reward']:.3f}", f"{r['mean_steps']:.1f}", r.get("infra_failures", 0), r["n"]]
-               for r in report.leaderboard],
-              title=f"{report.suite_id} → {out / 'report.json'}")
+        table(
+            ["model", "success", *ks, "mean reward", "mean steps", "infra", "n"],
+            [
+                [
+                    r["model_id"],
+                    fmt_pct(r["success_rate"]),
+                    *[fmt_pct(r.get(k)) for k in ks],
+                    f"{r['mean_reward']:.3f}",
+                    f"{r['mean_steps']:.1f}",
+                    r.get("infra_failures", 0),
+                    r["n"],
+                ]
+                for r in report.leaderboard
+            ],
+            title=f"{report.suite_id} → {out / 'report.json'}",
+        )
 
     emit(st, {"report": str(out / "report.json"), "leaderboard": report.leaderboard}, human)
     if min_success_rate is not None:
@@ -234,7 +304,7 @@ def bench_run(
 def bench_show(
     ctx: typer.Context,
     report: Annotated[Path, typer.Argument(help="report.json or run directory")],
-    out: Annotated[Optional[Path], typer.Option("--out", help="Write extended markdown")] = None,
+    out: Annotated[Path | None, typer.Option("--out", help="Write extended markdown")] = None,
 ) -> None:
     """Leaderboard, per-task matrix and failure clusters of a report."""
     import hashlib
@@ -250,22 +320,33 @@ def bench_show(
     lines = [render_markdown(r)]
     model_ids = [m.model_id for m in r.models]
     if len(model_ids) > 1:
-        lines += ["", "## Task × model pass@1", "", "| Task | " + " | ".join(model_ids) + " |",
-                  "| --- |" + " --- |" * len(model_ids)]
+        lines += [
+            "",
+            "## Task × model pass@1",
+            "",
+            "| Task | " + " | ".join(model_ids) + " |",
+            "| --- |" + " --- |" * len(model_ids),
+        ]
         per: dict[str, dict[str, float]] = defaultdict(dict)
         for m in r.models:
             for t in m.by_task:
                 per[t.task_id][m.model_id] = t.pass_at_1
         for tid in sorted(per):
-            lines.append(f"| {tid} | " + " | ".join(f"{per[tid].get(mid, 0):.2f}" for mid in model_ids) + " |")
+            lines.append(
+                f"| {tid} | "
+                + " | ".join(f"{per[tid].get(mid, 0):.2f}" for mid in model_ids)
+                + " |"
+            )
     clusters: dict[str, list[str]] = defaultdict(list)
-    for t in iter_trajectories(path.parent):
-        if t.success:
+    for tr in iter_trajectories(path.parent):
+        if tr.success:
             continue
-        v = t.verify
-        head = re.sub(r"\d+\.\d+s|0x[0-9a-f]+", "#", (v.stdout if v else t.error or "")[:200])
-        key = f"{t.failure_kind}|exit={v.exit_code if v else None}|{head}"
-        clusters[hashlib.sha1(key.encode()).hexdigest()[:10] + " " + key.replace("\n", " ")[:90]].append(t.task_id)
+        v = tr.verify
+        head = re.sub(r"\d+\.\d+s|0x[0-9a-f]+", "#", (v.stdout if v else tr.error or "")[:200])
+        key = f"{tr.failure_kind}|exit={v.exit_code if v else None}|{head}"
+        clusters[
+            hashlib.sha1(key.encode()).hexdigest()[:10] + " " + key.replace("\n", " ")[:90]
+        ].append(tr.task_id)
     if clusters:
         lines += ["", "## Top failure clusters", ""]
         for fp, ids in sorted(clusters.items(), key=lambda kv: -len(kv[1]))[:12]:
@@ -273,8 +354,11 @@ def bench_show(
     text = "\n".join(lines) + "\n"
     if out:
         out.write_text(text, encoding="utf-8")
-    emit(state(ctx), {"report": r.model_dump(mode="json"), "clusters": {k: len(v) for k, v in clusters.items()}},
-         lambda: typer.echo(text if not out else f"wrote {out}"))
+    emit(
+        state(ctx),
+        {"report": r.model_dump(mode="json"), "clusters": {k: len(v) for k, v in clusters.items()}},
+        lambda: typer.echo(text if not out else f"wrote {out}"),
+    )
 
 
 @bench_app.command("compare")
@@ -283,7 +367,8 @@ def bench_compare(
     a: Annotated[Path, typer.Argument(help="Baseline report.json")],
     b: Annotated[Path, typer.Argument(help="Candidate report.json")],
     fail_on_regression: Annotated[
-        Optional[float], typer.Option("--fail-on-regression", help="Exit 1 if success drops by more than X")
+        float | None,
+        typer.Option("--fail-on-regression", help="Exit 1 if success drops by more than X"),
     ] = None,
 ) -> None:
     """Paired per-task comparison with bootstrap CI and sign test."""
@@ -295,12 +380,21 @@ def bench_compare(
     def human() -> None:
         for w in res.warnings:
             typer.secho(f"warning: {w}", fg=typer.colors.YELLOW)
-        table(["model", "success A", "success B", "Δ", "95% CI (paired)", "W/L/T", "sign p"],
-              [[d["model_id"], fmt_pct(d["success_rate_a"]), fmt_pct(d["success_rate_b"]),
-                f"{d['delta_success_rate']:+.3f}",
-                "[{:+.3f}, {:+.3f}]".format(*d["paired"].get("ci95", [0, 0])),
-                f"{d['paired'].get('wins', 0)}/{d['paired'].get('losses', 0)}/{d['paired'].get('ties', 0)}",
-                f"{d['paired'].get('sign_test_p', 1):.3f}"] for d in res.deltas])
+        table(
+            ["model", "success A", "success B", "Δ", "95% CI (paired)", "W/L/T", "sign p"],
+            [
+                [
+                    d["model_id"],
+                    fmt_pct(d["success_rate_a"]),
+                    fmt_pct(d["success_rate_b"]),
+                    f"{d['delta_success_rate']:+.3f}",
+                    "[{:+.3f}, {:+.3f}]".format(*d["paired"].get("ci95", [0, 0])),
+                    "/".join(str(d["paired"].get(k, 0)) for k in ("wins", "losses", "ties")),
+                    f"{d['paired'].get('sign_test_p', 1):.3f}",
+                ]
+                for d in res.deltas
+            ],
+        )
 
     emit(state(ctx), res.model_dump(), human)
     if fail_on_regression is not None and any(

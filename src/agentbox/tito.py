@@ -56,7 +56,9 @@ Generate = Callable[[list[int], dict[str, Any]], Awaitable[GenOutput]]
 class ChatTokenizer:
     """Render chat turns to token ids without re-rendering history."""
 
-    def __init__(self, tokenizer: Any, *, chat_template_kwargs: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self, tokenizer: Any, *, chat_template_kwargs: dict[str, Any] | None = None
+    ) -> None:
         self.tok = tokenizer
         self.kw = dict(chat_template_kwargs or {})
 
@@ -87,7 +89,9 @@ class ChatTokenizer:
     def encode(self, text: str) -> list[int]:
         return list(self.tok.encode(text, add_special_tokens=False))
 
-    def initial(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None) -> list[int]:
+    def initial(
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
+    ) -> list[int]:
         return self.encode(self._render(messages, generation=True, tools=tools))
 
     def tool_delta(self, messages: list[dict[str, Any]], completion_ids: list[int]) -> list[int]:
@@ -101,11 +105,11 @@ class ChatTokenizer:
         idx = full.rfind(_MARKER)
         if idx < 0:
             raise ValueError("chat template dropped the assistant content")
-        text = full[idx + len(_MARKER):]
+        text = full[idx + len(_MARKER) :]
         if completion_ids:
             last = self.tok.decode([completion_ids[-1]], skip_special_tokens=False)
             if last and text.startswith(last):
-                text = text[len(last):]  # the model already emitted the stop token
+                text = text[len(last) :]  # the model already emitted the stop token
         return self.encode(text)
 
 
@@ -210,7 +214,7 @@ class TitoModelClient:
         if session is None or len(messages) < session.n_messages:
             session = self._sessions[key] = _Session(ids=self.chat.initial(messages, tools))
         else:
-            new = [m for m in messages[session.n_messages:] if m.get("role") != "assistant"]
+            new = [m for m in messages[session.n_messages :] if m.get("role") != "assistant"]
             if new:
                 session.ids.extend(self.chat.tool_delta(new, session.last_completion))
         prompt = list(session.ids)
