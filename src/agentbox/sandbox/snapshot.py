@@ -1,13 +1,13 @@
-"""Container snapshot helpers (commit image for fast restore)."""
+"""Container snapshot helpers (commit a sandbox to an image)."""
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from typing import Any
 
 from agentbox.errors import SandboxError
+from agentbox.sandbox.backend import DockerBackend, get_backend
 from agentbox.sandbox.types import Sandbox
 
 logger = logging.getLogger("agentbox.snapshot")
@@ -20,24 +20,13 @@ async def commit_sandbox(
     tag: str | None = None,
     docker_client: Any | None = None,
 ) -> str:
-    """Commit the sandbox container filesystem to a new image.
-
-    Returns the image tag ``repository:tag``.
-    """
-    from agentbox.sandbox import docker_backend
-
-    client = docker_backend.get_client(docker_client)
-    tag = tag or f"{sandbox.task_id[:20]}-{int(time.time())}"
-    container = await asyncio.to_thread(client.containers.get, sandbox.id)
-
-    def _commit() -> str:
-        image = container.commit(repository=repository, tag=tag)
-        # image.tags may be empty for intermediate; construct name
-        full = f"{repository}:{tag}"
-        logger.info("snapshot.committed sandbox=%s image=%s", sandbox.id[:12], full)
-        return full
-
+    """Commit the sandbox container filesystem to a new image; returns ``repo:tag``."""
+    backend = DockerBackend(client=docker_client) if docker_client is not None else get_backend()
+    safe_task = "".join(c if c.isalnum() or c in "-_." else "-" for c in sandbox.task_id)
+    tag = tag or f"{safe_task[:40] or 'task'}-{int(time.time())}"
     try:
-        return await asyncio.to_thread(_commit)
+        full = await backend.run_ctl(backend.commit_sync, sandbox.id, repository=repository, tag=tag)
     except Exception as exc:
         raise SandboxError(f"Failed to commit sandbox: {exc}") from exc
+    logger.info("snapshot.committed sandbox=%s image=%s", sandbox.id[:12], full)
+    return full

@@ -117,6 +117,7 @@ class Rollout:
         )
 
         sandbox_handle = None
+        outcome: FinalStatus | None = None
         t_start = time.monotonic()
         try:
             t0 = time.monotonic()
@@ -237,15 +238,29 @@ class Rollout:
                 },
             )
             traj.metrics.duration_s = time.monotonic() - t_start
+            outcome = traj.final_status
             return traj
         except Exception as exc:
             logger.exception("rollout failed task_id=%s", task.task_id)
             recorder.set_metrics(duration_s=time.monotonic() - t_start)
+            outcome = FinalStatus.ERROR
             return recorder.finalize(
                 reward=0.0,
                 final_status=FinalStatus.ERROR,
                 error=str(exc),
             )
         finally:
-            if sandbox_handle is not None and not sandbox_cfg.keep_on_failure:
-                await mgr.destroy(sandbox_handle)
+            if sandbox_handle is not None:
+                keep = not sandbox_cfg.auto_remove or (
+                    sandbox_cfg.keep_on_failure and outcome != FinalStatus.SUCCESS
+                )
+                if keep:
+                    mgr.keep(sandbox_handle)
+                    logger.warning(
+                        "keeping sandbox %s (status=%s); inspect with: docker exec -it %s sh",
+                        sandbox_handle.name,
+                        outcome.value if outcome else "unknown",
+                        sandbox_handle.name,
+                    )
+                else:
+                    await mgr.destroy(sandbox_handle)

@@ -52,16 +52,6 @@ class TaskSeeder:
                         duration_s=time.monotonic() - t0,
                     )
 
-            healthy = await self.manager.healthcheck(sandbox)
-            if not healthy:
-                return SeedResult(
-                    ok=False,
-                    files_written=files_written,
-                    setup_results=setup_results,
-                    error="sandbox healthcheck failed after seed",
-                    duration_s=time.monotonic() - t0,
-                )
-
             return SeedResult(
                 ok=True,
                 files_written=files_written,
