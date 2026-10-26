@@ -102,9 +102,7 @@ class SandboxManager:
         return list(self.config.shell or self._shells.get(image) or ["/bin/sh", "-c"])
 
     # ------------------------------------------------------------- lifecycle
-    def container_spec(
-        self, *, image: str, name: str, labels: Mapping[str, str]
-    ) -> ContainerSpec:
+    def container_spec(self, *, image: str, name: str, labels: Mapping[str, str]) -> ContainerSpec:
         cfg = self.config
         lim = cfg.limits
         sec = cfg.security
@@ -224,7 +222,9 @@ class SandboxManager:
     ) -> ExecResult:
         if sandbox.status == "destroyed":
             raise SandboxError(f"Sandbox {sandbox.id[:12]} is destroyed")
-        cmd = [*self.shell_for(sandbox.image), command] if isinstance(command, str) else list(command)
+        cmd = (
+            [*self.shell_for(sandbox.image), command] if isinstance(command, str) else list(command)
+        )
         cfg = self.config
         return await self.backend.exec(
             sandbox.id,
@@ -300,9 +300,7 @@ class SandboxManager:
             abs_path = resolve_workspace_path(sandbox.workspace_dir, target)
         raise SandboxError(f"too many levels of symbolic links: {path}")
 
-    async def read_file(
-        self, sandbox: Sandbox, path: str, *, max_bytes: int | None = None
-    ) -> str:
+    async def read_file(self, sandbox: Sandbox, path: str, *, max_bytes: int | None = None) -> str:
         try:
             data = await self.read_bytes(sandbox, path, max_bytes=max_bytes)
         except FileNotFoundError as exc:

@@ -39,9 +39,7 @@ def _mock(fixed: str) -> MockModelClient:
                         id="c1",
                         function=FunctionCall(
                             name="write_file",
-                            arguments=json.dumps(
-                                {"path": "fizzbuzz.py", "content": fixed}
-                            ),
+                            arguments=json.dumps({"path": "fizzbuzz.py", "content": fixed}),
                         ),
                     )
                 ],
@@ -62,8 +60,7 @@ async def test_three_parallel_mock_rollouts() -> None:
         starter_files={
             "fizzbuzz.py": "def fizzbuzz(n):\n    return str(n)\n",
             "test_fizzbuzz.py": (
-                "from fizzbuzz import fizzbuzz\n\n"
-                "def test_3():\n    assert fizzbuzz(3) == 'Fizz'\n"
+                "from fizzbuzz import fizzbuzz\n\ndef test_3():\n    assert fizzbuzz(3) == 'Fizz'\n"
             ),
         },
         setup_commands=["pip install -q pytest"],
@@ -71,12 +68,7 @@ async def test_three_parallel_mock_rollouts() -> None:
             type=VerifierType.PYTEST, command="python -m pytest -q", timeout_s=60
         ),
     )
-    fixed = (
-        "def fizzbuzz(n):\n"
-        "    if n % 3 == 0:\n"
-        "        return 'Fizz'\n"
-        "    return str(n)\n"
-    )
+    fixed = "def fizzbuzz(n):\n    if n % 3 == 0:\n        return 'Fizz'\n    return str(n)\n"
     sandbox = SandboxConfig(
         limits=ResourceLimits(network_disabled=False, memory_mb=512),
         ensure_pytest=False,

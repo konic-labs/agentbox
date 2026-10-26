@@ -18,11 +18,7 @@ from agentbox.types import VerifierType
 def _sample_task(*, near_solution: bool = False) -> Task:
     if near_solution:
         starter = {
-            "solution.py": (
-                "def is_even(n):\n"
-                "    # BUG: inverted\n"
-                "    return n % 2 != 0\n"
-            ),
+            "solution.py": ("def is_even(n):\n    # BUG: inverted\n    return n % 2 != 0\n"),
             "test_solution.py": "from solution import is_even\ndef test():\n    assert is_even(2)\n",
         }
         desc = "Fix the inverted boolean; should use == 0 instead of != 0"
@@ -93,9 +89,7 @@ def test_prediction_to_report_reject_near_solution() -> None:
         reasons = "full solution with one flipped operator"
         suggested_fixes = "replace body with NotImplementedError"
 
-    report = _prediction_to_report(
-        _sample_task(near_solution=True), Pred(), min_score=0.65
-    )
+    report = _prediction_to_report(_sample_task(near_solution=True), Pred(), min_score=0.65)
     assert report.ok is False
     assert report.llm_ok is False
     assert any("near_solution" in e for e in report.errors)

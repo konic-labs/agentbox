@@ -8,7 +8,7 @@ import platform
 import shutil
 import sys
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Any
 
 import typer
 
@@ -42,19 +42,25 @@ app = typer.Typer(
 def _root(
     ctx: typer.Context,
     config: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Option("--config", "-C", envvar="AGENTBOX_CONFIG", help="Project config file."),
     ] = None,
     profile: Annotated[
-        Optional[str],
-        typer.Option("--profile", "-P", envvar="AGENTBOX_PROFILE", help="Model profile from the config."),
+        str | None,
+        typer.Option(
+            "--profile", "-P", envvar="AGENTBOX_PROFILE", help="Model profile from the config."
+        ),
     ] = None,
     json_out: Annotated[bool, typer.Option("--json", help="Machine-readable JSON output.")] = False,
-    verbose: Annotated[int, typer.Option("--verbose", "-v", count=True, help="-v info, -vv debug.")] = 0,
+    verbose: Annotated[
+        int, typer.Option("--verbose", "-v", count=True, help="-v info, -vv debug.")
+    ] = 0,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Only errors.")] = False,
     log_format: Annotated[str, typer.Option("--log-format", help="text | json")] = "text",
 ) -> None:
-    ctx.obj = State(config_path=config, profile=profile, json=json_out, verbose=verbose, quiet=quiet)
+    ctx.obj = State(
+        config_path=config, profile=profile, json=json_out, verbose=verbose, quiet=quiet
+    )
     setup_logging(verbose, quiet, log_format)
 
 
@@ -69,7 +75,9 @@ from agentbox.cli import task as _task  # noqa: E402
 from agentbox.cli import train as _train  # noqa: E402
 from agentbox.cli import traj as _traj  # noqa: E402
 
-app.command("run", help="Run rollouts for tasks (files, dirs, JSONL) and stream trajectories.")(_run.run)
+app.command("run", help="Run rollouts for tasks (files, dirs, JSONL) and stream trajectories.")(
+    _run.run
+)
 app.add_typer(_sandbox.sandbox_app, name="sandbox")
 app.add_typer(_cache.cache_app, name="cache")
 app.add_typer(_cache.image_app, name="image")
@@ -94,16 +102,20 @@ def version(ctx: typer.Context) -> None:
 @app.command()
 def doctor(
     ctx: typer.Context,
-    model: Annotated[Optional[str], typer.Option("--model", "-m", help="Probe this model id.")] = None,
-    base_url: Annotated[Optional[str], typer.Option("--base-url")] = None,
-    api_key_env: Annotated[Optional[str], typer.Option("--api-key-env")] = None,
-    image: Annotated[Optional[str], typer.Option("--image", help="Image to check.")] = None,
-    skip_tools: Annotated[bool, typer.Option("--skip-tools", help="Only probe plain chat.")] = False,
-    probe: Annotated[bool, typer.Option("--probe/--no-probe", help="Probe the model endpoint.")] = True,
+    model: Annotated[str | None, typer.Option("--model", "-m", help="Probe this model id.")] = None,
+    base_url: Annotated[str | None, typer.Option("--base-url")] = None,
+    api_key_env: Annotated[str | None, typer.Option("--api-key-env")] = None,
+    image: Annotated[str | None, typer.Option("--image", help="Image to check.")] = None,
+    skip_tools: Annotated[
+        bool, typer.Option("--skip-tools", help="Only probe plain chat.")
+    ] = False,
+    probe: Annotated[
+        bool, typer.Option("--probe/--no-probe", help="Probe the model endpoint.")
+    ] = True,
 ) -> None:
     """Check Python, Docker, sandbox image, caches, integrations and (optionally) a model."""
     st = state(ctx)
-    report: dict[str, object] = {
+    report: dict[str, Any] = {
         "agentbox": __version__,
         "python": sys.version.split()[0],
         "platform": platform.platform(),
@@ -126,7 +138,7 @@ def doctor(
         }
         root = info.get("DockerRootDir")
         if root and Path(root).exists():
-            report["docker"]["free_gb"] = round(shutil.disk_usage(root).free / 2**30, 1)  # type: ignore[index]
+            report["docker"]["free_gb"] = round(shutil.disk_usage(root).free / 2**30, 1)
         cfg_image = image or (st.project.sandbox.image if st.project.sandbox else None)
         from agentbox.config import SandboxConfig
 
@@ -181,18 +193,23 @@ def doctor(
                 fg=typer.colors.GREEN,
             )
         else:
-            typer.secho(f"docker: FAIL ({d.get('error') if isinstance(d, dict) else d})", fg=typer.colors.RED)
+            typer.secho(
+                f"docker: FAIL ({d.get('error') if isinstance(d, dict) else d})",
+                fg=typer.colors.RED,
+            )
         if "image" in report:
             typer.echo(f"image: {report['image']}")
-            typer.echo(f"containers: {report['containers']} · cache images: {report['cache_images']}")
-        installed = {k: v for k, v in report["integrations"].items() if v}  # type: ignore[union-attr]
+            typer.echo(
+                f"containers: {report['containers']} · cache images: {report['cache_images']}"
+            )
+        installed = {k: v for k, v in report["integrations"].items() if v}
         typer.echo(f"integrations installed: {installed or 'none'}")
         if "model" in report:
             from agentbox.model.probe import ProbeResult, format_probe_results
 
             m = report["model"]
-            checks = [ProbeResult.model_validate(c) for c in m["checks"]]  # type: ignore[index]
-            typer.echo(f"model probe: {m['model']} @ {m['base_url'] or 'default'}")  # type: ignore[index]
+            checks = [ProbeResult.model_validate(c) for c in m["checks"]]
+            typer.echo(f"model probe: {m['model']} @ {m['base_url'] or 'default'}")
             typer.echo(format_probe_results(checks))
 
     emit(st, report, human)
@@ -211,7 +228,10 @@ def integrations(ctx: typer.Context) -> None:
         rows,
         lambda: table(
             ["name", "installed", "entry point", "install", "what"],
-            [[r["name"], r["version"] or "—", r["entry_point"], r["install"], r["description"]] for r in rows],
+            [
+                [r["name"], r["version"] or "—", r["entry_point"], r["install"], r["description"]]
+                for r in rows
+            ],
             title="AgentBox integrations",
         ),
     )
@@ -258,7 +278,7 @@ def init(
     ctx: typer.Context,
     directory: Annotated[Path, typer.Argument(help="Project directory")] = Path("."),
     trainer: Annotated[
-        Optional[str], typer.Option("--trainer", help="Also scaffold a trainer script: trl")
+        str | None, typer.Option("--trainer", help="Also scaffold a trainer script: trl")
     ] = None,
     force: Annotated[bool, typer.Option("--force", help="Overwrite existing files.")] = False,
 ) -> None:
@@ -267,7 +287,8 @@ def init(
     written = []
     targets: dict[Path, str] = {
         directory / "agentbox.yaml": _INIT_CONFIG,
-        directory / "tasks" / "example_add" / "task.json": json.dumps(_EXAMPLE_TASK, indent=2) + "\n",
+        directory / "tasks" / "example_add" / "task.json": json.dumps(_EXAMPLE_TASK, indent=2)
+        + "\n",
     }
     if trainer == "trl":
         from agentbox.cli.train import TRL_TEMPLATE
@@ -311,7 +332,9 @@ def config_validate(ctx: typer.Context) -> None:
     emit(
         st,
         {"ok": True, "path": str(cfg.path), "profiles": sorted(cfg.all_models())},
-        lambda: typer.secho(f"ok: {cfg.path} ({len(cfg.all_models())} model profiles)", fg=typer.colors.GREEN),
+        lambda: typer.secho(
+            f"ok: {cfg.path} ({len(cfg.all_models())} model profiles)", fg=typer.colors.GREEN
+        ),
     )
 
 
@@ -329,7 +352,7 @@ def _legacy_run_dir(
     ctx: typer.Context,
     tasks_dir: Path,
     model: Annotated[str, typer.Option("--model", "-m")],
-    base_url: Annotated[Optional[str], typer.Option("--base-url")] = None,
+    base_url: Annotated[str | None, typer.Option("--base-url")] = None,
     concurrency: Annotated[int, typer.Option("--concurrency", "-c")] = 8,
     n: Annotated[int, typer.Option("--n")] = 1,
     out: Annotated[Path, typer.Option("--out", "-o")] = Path("trajectories"),
@@ -337,8 +360,15 @@ def _legacy_run_dir(
 ) -> None:
     """Deprecated: use `agentbox run DIR`."""
     ctx.invoke(
-        _run.run, ctx=ctx, tasks=[tasks_dir], model=model, base_url=base_url,
-        concurrency=concurrency, n=n, out=out, network=network,
+        _run.run,
+        ctx=ctx,
+        tasks=[tasks_dir],
+        model=model,
+        base_url=base_url,
+        concurrency=concurrency,
+        n=n,
+        out=out,
+        network=network,
     )
 
 

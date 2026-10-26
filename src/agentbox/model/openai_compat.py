@@ -214,8 +214,7 @@ class OpenAICompatClient:
                     raise ContextLengthError(msg) from exc
                 if tools and ("tool" in msg.lower() or "function" in msg.lower()):
                     raise ModelError(
-                        "Model/server does not appear to support tool calling. "
-                        f"Details: {msg}"
+                        f"Model/server does not appear to support tool calling. Details: {msg}"
                     ) from exc
                 raise ModelError(f"Chat completion failed: {msg}") from exc
             except (AuthenticationError, PermissionDeniedError, NotFoundError) as exc:

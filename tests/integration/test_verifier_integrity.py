@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from agentbox import Rollout, Task
-from agentbox.config import AgentConfig, ResourceLimits, RolloutConfig, SandboxConfig, ModelConfig
+from agentbox.config import AgentConfig, ModelConfig, ResourceLimits, RolloutConfig, SandboxConfig
 from agentbox.model.base import ModelResponse
 from agentbox.model.mock import MockModelClient
 from agentbox.rewards import RewardSpec
@@ -52,7 +52,12 @@ def _sandbox(**kw: Any) -> SandboxConfig:
 
 def _writes(*files: tuple[str, str]) -> MockModelClient:
     calls = [
-        ToolCall(id=f"c{i}", function=FunctionCall(name="write_file", arguments=json.dumps({"path": p, "content": c})))
+        ToolCall(
+            id=f"c{i}",
+            function=FunctionCall(
+                name="write_file", arguments=json.dumps({"path": p, "content": c})
+            ),
+        )
         for i, (p, c) in enumerate(files)
     ]
     return MockModelClient([ModelResponse(tool_calls=calls), ModelResponse(content="done")])
@@ -113,7 +118,9 @@ async def test_hidden_tests_and_honest_fix() -> None:
 async def test_pytest_fraction_partial_credit() -> None:
     # add(a, b) = a * b passes add(2,2)==4 and add(0,0)==0 but not add(1,1)==2
     partial = _writes(("calc.py", "def add(a, b):\n    return a * b\n"))
-    traj = await Rollout.run(_task(reward_mode="pytest_fraction"), model=partial, sandbox=_sandbox())
+    traj = await Rollout.run(
+        _task(reward_mode="pytest_fraction"), model=partial, sandbox=_sandbox()
+    )
     assert traj.verify is not None
     assert traj.verify.tests_total == 3 and traj.verify.tests_passed == 2
     assert abs(traj.reward - 2 / 3) < 1e-6
@@ -126,16 +133,21 @@ async def test_stdout_reward_and_reward_breakdown() -> None:
         description="noop",
         verifier=VerifierSpec(
             type=VerifierType.COMMAND,
-            command="echo progress; echo '{\"reward\": 0.25, \"note\": \"x\"}'",
+            command='echo progress; echo \'{"reward": 0.25, "note": "x"}\'',
             reward_mode="stdout",
         ),
     )
     cfg = RolloutConfig(
         model=ModelConfig(model="mock"),
         sandbox=_sandbox(ensure_pytest=False),
-        rewards=[RewardSpec(name="verifier"), RewardSpec(name="step_penalty", params={"per_step": 0.1})],
+        rewards=[
+            RewardSpec(name="verifier"),
+            RewardSpec(name="step_penalty", params={"per_step": 0.1}),
+        ],
     )
-    traj = await Rollout.run(task, model=MockModelClient([ModelResponse(content="done")]), config=cfg)
+    traj = await Rollout.run(
+        task, model=MockModelClient([ModelResponse(content="done")]), config=cfg
+    )
     assert traj.reward_breakdown == {"verifier": 0.25, "step_penalty": -0.0}
     assert abs(traj.reward - 0.25) < 1e-9
 
@@ -172,7 +184,9 @@ async def test_failing_setup_is_seed_failure() -> None:
         verifier=VerifierSpec(type=VerifierType.COMMAND, command="true"),
     )
     traj = await Rollout.run(
-        task, model=MockModelClient([ModelResponse(content="done")]), sandbox=_sandbox(ensure_pytest=False)
+        task,
+        model=MockModelClient([ModelResponse(content="done")]),
+        sandbox=_sandbox(ensure_pytest=False),
     )
     assert traj.failure_kind == FailureKind.SEED and not traj.is_trainable
 

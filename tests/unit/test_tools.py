@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from agentbox.tools.base import BaseTool
 from agentbox.tools.builtins import default_tools
 from agentbox.tools.decorator import tool
@@ -57,9 +55,7 @@ def test_registry_override_and_custom_only() -> None:
     reg = build_tool_registry(ToolMode.STRUCTURED, custom_tools=[FakeRead()])
     assert isinstance(reg.get("read_file"), FakeRead)
 
-    reg2 = build_tool_registry(
-        ToolMode.CUSTOM, custom_tools=[FakeRead()], include_builtins=False
-    )
+    reg2 = build_tool_registry(ToolMode.CUSTOM, custom_tools=[FakeRead()], include_builtins=False)
     assert reg2.names() == ["read_file"]
 
 

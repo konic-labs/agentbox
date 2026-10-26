@@ -83,8 +83,8 @@ def resolve_reward(spec: RewardSpec) -> RewardFn:
 
         fn = load_callable(spec.name)
         if spec.params:
-            return lambda ctx: fn(ctx, **spec.params)  # type: ignore[no-any-return]
-        return fn  # type: ignore[return-value]
+            return lambda ctx: fn(ctx, **spec.params)
+        return fn
     raise KeyError(f"unknown reward {spec.name!r}; available: {available_rewards()}")
 
 
@@ -97,7 +97,7 @@ async def compute_reward(
         value = resolve_reward(spec)(ctx)
         if asyncio.iscoroutine(value) or isinstance(value, Awaitable):
             value = await value
-        weighted = spec.weight * float(value)  # type: ignore[arg-type]
+        weighted = spec.weight * float(value)
         key = spec.name
         n = 2
         while key in breakdown:
@@ -243,7 +243,9 @@ def _llm_judge(
             role = m.role.value if hasattr(m.role, "value") else m.role
             body = m.content or ""
             if m.tool_calls:
-                body += " " + " ".join(f"{t.function.name}({t.function.arguments})" for t in m.tool_calls)
+                body += " " + " ".join(
+                    f"{t.function.name}({t.function.arguments})" for t in m.tool_calls
+                )
             lines.append(f"[{role}] {body}")
         verify = "n/a"
         if ctx.verify is not None:
@@ -257,9 +259,9 @@ def _llm_judge(
         async with OpenAICompatClient(cfg) as client:
             resp = await client.complete([{"role": "user", "content": prompt}])
         text = resp.content or ""
-        m = re.search(r"\{.*\}", text, re.S)
+        found = re.search(r"\{.*\}", text, re.S)
         try:
-            score = float(json.loads(m.group(0))["score"]) if m else float(text.strip())
+            score = float(json.loads(found.group(0))["score"]) if found else float(text.strip())
         except (ValueError, KeyError, TypeError):
             logger.warning("llm_judge returned unparsable output: %r", text[:200])
             return 0.0

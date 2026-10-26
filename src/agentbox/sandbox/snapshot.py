@@ -25,7 +25,9 @@ async def commit_sandbox(
     safe_task = "".join(c if c.isalnum() or c in "-_." else "-" for c in sandbox.task_id)
     tag = tag or f"{safe_task[:40] or 'task'}-{int(time.time())}"
     try:
-        full = await backend.run_ctl(backend.commit_sync, sandbox.id, repository=repository, tag=tag)
+        full = await backend.run_ctl(
+            backend.commit_sync, sandbox.id, repository=repository, tag=tag
+        )
     except Exception as exc:
         raise SandboxError(f"Failed to commit sandbox: {exc}") from exc
     logger.info("snapshot.committed sandbox=%s image=%s", sandbox.id[:12], full)

@@ -8,7 +8,7 @@ import shutil
 import time
 import uuid
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 
@@ -33,8 +33,8 @@ def _parse_age(value: str | None) -> float | None:
 def sandbox_up(
     ctx: typer.Context,
     task: Annotated[Path, typer.Argument(help="Task file or directory to seed")],
-    network: Annotated[Optional[bool], typer.Option("--network/--no-network")] = None,
-    image: Annotated[Optional[str], typer.Option("--image")] = None,
+    network: Annotated[bool | None, typer.Option("--network/--no-network")] = None,
+    image: Annotated[str | None, typer.Option("--image")] = None,
 ) -> None:
     """Seed a task into a sandbox and leave it running (prints how to attach)."""
     from agentbox.config import SandboxConfig
@@ -58,15 +58,21 @@ def sandbox_up(
         return {"name": prov.sandbox.name, "id": prov.sandbox.id, "image": prov.sandbox.image}
 
     info = asyncio.run(go())
-    emit(st, info, lambda: (
-        typer.secho(f"sandbox {info['name']} is up ({info['image']})", fg=typer.colors.GREEN),
-        typer.echo(f"  agentbox sandbox shell {info['name']}"),
-        typer.echo(f"  agentbox sandbox exec {info['name']} -- python -m pytest -q"),
-        typer.echo(f"  agentbox sandbox rm {info['name']}"),
-    ))
+    emit(
+        st,
+        info,
+        lambda: (
+            typer.secho(f"sandbox {info['name']} is up ({info['image']})", fg=typer.colors.GREEN),
+            typer.echo(f"  agentbox sandbox shell {info['name']}"),
+            typer.echo(f"  agentbox sandbox exec {info['name']} -- python -m pytest -q"),
+            typer.echo(f"  agentbox sandbox rm {info['name']}"),
+        ),
+    )
 
 
-@sandbox_app.command("exec", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+@sandbox_app.command(
+    "exec", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+)
 def sandbox_exec(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument(help="Container name or id")],
@@ -81,8 +87,9 @@ def sandbox_exec(
     if not cmd:
         fail("no command given (use: agentbox sandbox exec NAME -- CMD)")
     backend = get_backend()
-    res = backend.exec_sync(name, ["/bin/sh", "-c", " ".join(cmd)], timeout_s=timeout,
-                            workdir="/workspace")
+    res = backend.exec_sync(
+        name, ["/bin/sh", "-c", " ".join(cmd)], timeout_s=timeout, workdir="/workspace"
+    )
     typer.echo(res.stdout, nl=False)
     if res.stderr:
         typer.echo(res.stderr, err=True, nl=False)
@@ -95,8 +102,20 @@ def sandbox_shell(name: Annotated[str, typer.Argument(help="Container name or id
     docker = shutil.which("docker")
     if docker is None:
         fail("the docker CLI is required for an interactive shell")
-    os.execvp(docker, [docker, "exec", "-it", "-w", "/workspace", name, "sh", "-c",
-                       "command -v bash >/dev/null && exec bash || exec sh"])
+    os.execvp(
+        docker,
+        [
+            docker,
+            "exec",
+            "-it",
+            "-w",
+            "/workspace",
+            name,
+            "sh",
+            "-c",
+            "command -v bash >/dev/null && exec bash || exec sh",
+        ],
+    )
 
 
 @sandbox_app.command("ls")
@@ -117,20 +136,29 @@ def sandbox_ls(
         if role != "sandbox" and not all_:
             continue
         created = float(labels.get("agentbox.created") or c.get("Created") or now)
-        rows.append({
-            "name": (c.get("Names") or ["?"])[0].lstrip("/"),
-            "id": c["Id"][:12],
-            "task": labels.get("agentbox.task_id", ""),
-            "state": c.get("State"),
-            "age_s": int(now - created),
-            "owner": labels.get("agentbox.owner", "?"),
-            "orphan": is_orphan(labels),
-            "role": role,
-        })
-    emit(st, rows, lambda: table(
-        ["name", "task", "state", "age", "owner", "orphan"],
-        [[r["name"], r["task"], r["state"], f"{r['age_s'] // 60}m", r["owner"], r["orphan"]] for r in rows],
-    ))
+        rows.append(
+            {
+                "name": (c.get("Names") or ["?"])[0].lstrip("/"),
+                "id": c["Id"][:12],
+                "task": labels.get("agentbox.task_id", ""),
+                "state": c.get("State"),
+                "age_s": int(now - created),
+                "owner": labels.get("agentbox.owner", "?"),
+                "orphan": is_orphan(labels),
+                "role": role,
+            }
+        )
+    emit(
+        st,
+        rows,
+        lambda: table(
+            ["name", "task", "state", "age", "owner", "orphan"],
+            [
+                [r["name"], r["task"], r["state"], f"{r['age_s'] // 60}m", r["owner"], r["orphan"]]
+                for r in rows
+            ],
+        ),
+    )
 
 
 @sandbox_app.command("rm")
@@ -151,8 +179,8 @@ def sandbox_rm(
 def sandbox_prune(
     ctx: typer.Context,
     all_: Annotated[bool, typer.Option("--all", help="Remove every AgentBox container")] = False,
-    run_id: Annotated[Optional[str], typer.Option("--run-id")] = None,
-    older_than: Annotated[Optional[str], typer.Option("--older-than", help="e.g. 2h")] = None,
+    run_id: Annotated[str | None, typer.Option("--run-id")] = None,
+    older_than: Annotated[str | None, typer.Option("--older-than", help="e.g. 2h")] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
 ) -> None:
     """Remove orphaned sandboxes (owner process gone), or all / by run / by age."""
@@ -165,5 +193,8 @@ def sandbox_prune(
         dry_run=dry_run,
     )
     verb = "would remove" if dry_run else "removed"
-    emit(state(ctx), {"removed": removed, "dry_run": dry_run},
-         lambda: typer.echo(f"{verb} {len(removed)} container(s)"))
+    emit(
+        state(ctx),
+        {"removed": removed, "dry_run": dry_run},
+        lambda: typer.echo(f"{verb} {len(removed)} container(s)"),
+    )

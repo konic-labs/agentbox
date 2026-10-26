@@ -27,7 +27,9 @@ def pass_at_k(n: int, c: int, k: int) -> float:
     return 1.0 - prob_all_fail
 
 
-def pass_at_k_table(counts: Sequence[tuple[int, int]], ks: Sequence[int] = (1, 5, 10)) -> dict[int, float]:
+def pass_at_k_table(
+    counts: Sequence[tuple[int, int]], ks: Sequence[int] = (1, 5, 10)
+) -> dict[int, float]:
     """Mean pass@k over tasks for every k that every task supports."""
     if not counts:
         return {}

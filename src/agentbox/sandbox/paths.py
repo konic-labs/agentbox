@@ -47,9 +47,7 @@ def resolve_workspace_path(workspace_dir: str, user_path: str) -> str:
     if normalized_str != workspace_str and not normalized_str.startswith(
         workspace_str.rstrip("/") + "/"
     ):
-        raise PathEscapeError(
-            f"path {user_path!r} resolves outside workspace {workspace_dir!r}"
-        )
+        raise PathEscapeError(f"path {user_path!r} resolves outside workspace {workspace_dir!r}")
     return normalized_str
 
 
@@ -60,6 +58,4 @@ def relative_to_workspace(workspace_dir: str, absolute_path: str) -> str:
     try:
         return str(ab.relative_to(ws))
     except ValueError as exc:
-        raise PathEscapeError(
-            f"path {absolute_path!r} is not under {workspace_dir!r}"
-        ) from exc
+        raise PathEscapeError(f"path {absolute_path!r} is not under {workspace_dir!r}") from exc

@@ -20,7 +20,7 @@ from agentbox.trajectory.schema import FunctionCall, ToolCall
 
 def test_classify_tool_error_vllm() -> None:
     msg = (
-        "Error code: 400 - \"auto\" tool choice requires "
+        'Error code: 400 - "auto" tool choice requires '
         "--enable-auto-tool-choice and --tool-call-parser to be set"
     )
     hint = classify_tool_error(msg)
@@ -73,7 +73,7 @@ async def test_probe_tools_fail_hint() -> None:
     cfg = ModelConfig(model="m", base_url="http://x", api_key="k")
     err = ModelError(
         "Model/server does not appear to support tool calling. Details: "
-        "Error code: 400 - \"auto\" tool choice requires --enable-auto-tool-choice"
+        'Error code: 400 - "auto" tool choice requires --enable-auto-tool-choice'
     )
     with patch(
         "agentbox.model.probe.OpenAICompatClient.complete",
@@ -91,9 +91,7 @@ def test_format_probe_results() -> None:
     text = format_probe_results(
         [
             ProbeResult(ok=True, kind="chat", model="m", message="ok"),
-            ProbeResult(
-                ok=False, kind="tools", model="m", message="fail", hint="do X"
-            ),
+            ProbeResult(ok=False, kind="tools", model="m", message="fail", hint="do X"),
         ]
     )
     assert "[ok] chat" in text

@@ -56,7 +56,9 @@ def engine_generator(llm_engine: Any, sampling_params: Any, max_length: int) -> 
         if room <= 0:
             from agentbox.errors import ContextLengthError
 
-            raise ContextLengthError(f"prompt ({len(prompt_ids)}) exceeds max_length ({max_length})")
+            raise ContextLengthError(
+                f"prompt ({len(prompt_ids)}) exceeds max_length ({max_length})"
+            )
         sp.max_tokens = min(int(getattr(sp, "max_tokens", room) or room), room)
         if getattr(sp, "logprobs", None) is None:
             sp.logprobs = 1
@@ -64,8 +66,12 @@ def engine_generator(llm_engine: Any, sampling_params: Any, max_length: int) -> 
         out = result.outputs[0]
         ids = list(out.token_ids)
         lps = [_logprob(e, t) for e, t in zip(out.logprobs or [], ids, strict=False)] or None
-        return GenOutput(token_ids=ids, text=out.text or "", logprobs=lps,
-                         finish_reason=getattr(out, "finish_reason", None))
+        return GenOutput(
+            token_ids=ids,
+            text=out.text or "",
+            logprobs=lps,
+            finish_reason=getattr(out, "finish_reason", None),
+        )
 
     return generate
 
@@ -140,10 +146,15 @@ def __getattr__(name: str) -> Any:
     if name == "AgentExecutor":
         from openrlhf.utils.agent import AgentExecutorBase
 
-        class AgentExecutor(AgentExecutorBase):  # type: ignore[misc, valid-type]
-            async def execute(  # type: ignore[override]
-                self, prompt: Any, label: Any, sampling_params: Any, max_length: int,
-                hf_tokenizer: Any, llm_engine: Any,
+        class AgentExecutor(AgentExecutorBase):  # type: ignore[misc]
+            async def execute(
+                self,
+                prompt: Any,
+                label: Any,
+                sampling_params: Any,
+                max_length: int,
+                hf_tokenizer: Any,
+                llm_engine: Any,
             ) -> dict[str, Any]:
                 return await run_episode(
                     prompt, label, sampling_params, max_length, hf_tokenizer, llm_engine

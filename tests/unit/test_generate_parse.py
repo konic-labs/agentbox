@@ -9,7 +9,9 @@ def test_parse_task_from_prediction() -> None:
     task = parse_task_from_prediction(
         task_id="t1",
         description="Fix the bug",
-        starter_files_json=json.dumps({"a.py": "x=1\n", "test_a.py": "def test():\n  assert False\n"}),
+        starter_files_json=json.dumps(
+            {"a.py": "x=1\n", "test_a.py": "def test():\n  assert False\n"}
+        ),
         setup_commands_json=json.dumps(["pip install -q pytest"]),
         verifier_json=json.dumps(
             {"type": "pytest", "command": "python -m pytest -q", "success_exit_code": 0}

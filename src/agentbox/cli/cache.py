@@ -7,7 +7,7 @@ import tempfile
 import time
 from importlib import resources
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 
@@ -31,14 +31,19 @@ def cache_ls(ctx: typer.Context) -> None:
         }
         for img in get_backend().list_cache_images_sync()
     ]
-    emit(state(ctx), rows, lambda: table(["tag", "size MB", "age h"],
-                                         [[r["tag"], r["size_mb"], r["age_h"]] for r in rows]))
+    emit(
+        state(ctx),
+        rows,
+        lambda: table(
+            ["tag", "size MB", "age h"], [[r["tag"], r["size_mb"], r["age_h"]] for r in rows]
+        ),
+    )
 
 
 @cache_app.command("prune")
 def cache_prune(
     ctx: typer.Context,
-    older_than_h: Annotated[Optional[float], typer.Option("--older-than-h")] = None,
+    older_than_h: Annotated[float | None, typer.Option("--older-than-h")] = None,
 ) -> None:
     """Remove cached images (all, or older than N hours); in-use images are kept."""
     from agentbox.sandbox.backend import get_backend
@@ -47,7 +52,10 @@ def cache_prune(
     now = time.time()
     removed = []
     for img in backend.list_cache_images_sync():
-        if older_than_h is not None and now - float(img.get("Created") or now) < older_than_h * 3600:
+        if (
+            older_than_h is not None
+            and now - float(img.get("Created") or now) < older_than_h * 3600
+        ):
             continue
         for tag in img.get("RepoTags") or []:
             try:
@@ -107,7 +115,9 @@ def image_build(
     ctx: typer.Context,
     tag: Annotated[str, typer.Option("--tag", "-t")] = "agentbox/sandbox:latest",
     base: Annotated[str, typer.Option("--base", help="Base image")] = "python:3.12-slim-bookworm",
-    dockerfile: Annotated[Optional[Path], typer.Option("--dockerfile", help="Custom Dockerfile")] = None,
+    dockerfile: Annotated[
+        Path | None, typer.Option("--dockerfile", help="Custom Dockerfile")
+    ] = None,
 ) -> None:
     """Build the baked sandbox image (Dockerfile ships with the package)."""
     from agentbox.sandbox.backend import get_backend
@@ -116,7 +126,9 @@ def image_build(
     content = (
         dockerfile.read_text(encoding="utf-8")
         if dockerfile
-        else resources.files("agentbox.data").joinpath("sandbox.Dockerfile").read_text(encoding="utf-8")
+        else resources.files("agentbox.data")
+        .joinpath("sandbox.Dockerfile")
+        .read_text(encoding="utf-8")
     )
     client = get_backend().client
     with tempfile.TemporaryDirectory() as tmp:
@@ -129,8 +141,11 @@ def image_build(
             for line in logs:
                 if isinstance(line, dict) and "stream" in line:
                     typer.echo(line["stream"], nl=False)
-    emit(st, {"tag": tag, "id": image.short_id},
-         lambda: typer.secho(f"built {tag} ({image.short_id})", fg=typer.colors.GREEN))
+    emit(
+        st,
+        {"tag": tag, "id": image.short_id},
+        lambda: typer.secho(f"built {tag} ({image.short_id})", fg=typer.colors.GREEN),
+    )
 
 
 @image_app.command("ls")
@@ -140,6 +155,14 @@ def image_ls(ctx: typer.Context) -> None:
     from agentbox.sandbox.images import PRESETS
 
     backend = get_backend()
-    rows = [{"preset": k, "image": v, "present": backend.image_exists_sync(v)} for k, v in PRESETS.items()]
-    emit(state(ctx), rows, lambda: table(["preset", "image", "present"],
-                                         [[r["preset"], r["image"], r["present"]] for r in rows]))
+    rows = [
+        {"preset": k, "image": v, "present": backend.image_exists_sync(v)}
+        for k, v in PRESETS.items()
+    ]
+    emit(
+        state(ctx),
+        rows,
+        lambda: table(
+            ["preset", "image", "present"], [[r["preset"], r["image"], r["present"]] for r in rows]
+        ),
+    )

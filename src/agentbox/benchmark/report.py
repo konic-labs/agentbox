@@ -27,8 +27,17 @@ def redact_model_config(cfg: dict[str, Any]) -> dict[str, Any]:
 class TaskTally:
     """Per-task counters accumulated while streaming (no trajectories kept)."""
 
-    __slots__ = ("n", "successes", "reward_sum", "steps_sum", "duration_sum", "statuses",
-                 "seed_errors", "setup_fails", "infra")
+    __slots__ = (
+        "n",
+        "successes",
+        "reward_sum",
+        "steps_sum",
+        "duration_sum",
+        "statuses",
+        "seed_errors",
+        "setup_fails",
+        "infra",
+    )
 
     def __init__(self) -> None:
         self.n = 0
@@ -179,7 +188,9 @@ def render_markdown(report: BenchmarkReport) -> str:
         "",
         "## Leaderboard",
         "",
-        "| Rank | Model | Success rate |" + pass_cols + " Mean reward | Mean steps | Mean duration (s) | Infra failures | n |",
+        "| Rank | Model | Success rate |"
+        + pass_cols
+        + " Mean reward | Mean steps | Mean duration (s) | Infra failures | n |",
         "| --- | --- | --- |" + " --- |" * len(ks) + " --- | --- | --- | --- | --- |",
     ]
     for i, row in enumerate(report.leaderboard, start=1):

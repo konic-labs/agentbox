@@ -16,9 +16,9 @@ import contextlib
 import logging
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -144,7 +144,7 @@ class _Progress:
 
 
 def _error_trajectory(job: Job, run_id: str, exc: BaseException) -> Trajectory:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return Trajectory(
         task_id=job.task.task_id,
         run_id=run_id,
@@ -263,7 +263,7 @@ class ParallelRunner:
         setup_checks: Sequence[Any] | None = None,
         skip: set[tuple[str, int]] | None = None,
         progress: bool = False,
-    ) -> AsyncIterator[Trajectory]:
+    ) -> AsyncGenerator[Trajectory, None]:
         """Yield trajectories as rollouts finish (completion order)."""
         if n_per_task < 1:
             raise ValueError("n_per_task must be >= 1")
@@ -292,8 +292,9 @@ class ParallelRunner:
                     *(worker() for _ in range(self.concurrency)), return_exceptions=True
                 )
                 failure.extend(
-                    r for r in results if isinstance(r, BaseException)
-                    and not isinstance(r, asyncio.CancelledError)
+                    r
+                    for r in results
+                    if isinstance(r, BaseException) and not isinstance(r, asyncio.CancelledError)
                 )
             finally:
                 await queue.put(None)

@@ -40,9 +40,7 @@ def _non_test_files(task: Task) -> dict[str, str]:
 
 def _test_files(task: Task) -> dict[str, str]:
     return {
-        str(p): str(c)
-        for p, c in (task.starter_files or {}).items()
-        if "test" in str(p).lower()
+        str(p): str(c) for p, c in (task.starter_files or {}).items() if "test" in str(p).lower()
     }
 
 
@@ -81,20 +79,20 @@ def _has_stub_bodies(src: dict[str, str]) -> tuple[bool, list[str]]:
                         if item.name.startswith("_") and item.name != "__init__":
                             continue
                         if not _is_stub_function(item):
-                            errors.append(
-                                f"{path}:{node.name}.{item.name}: expected stub body"
-                            )
+                            errors.append(f"{path}:{node.name}.{item.name}: expected stub body")
     if not found_def and src:
         errors.append("no public function/class methods found in non-test starters")
     return (len(errors) == 0), errors
 
 
 def _is_stub_function(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-    body = [n for n in node.body if not isinstance(n, (ast.Expr, ast.Pass))]
+    [n for n in node.body if not isinstance(n, (ast.Expr, ast.Pass))]
     # docstring-only + pass/ellipsis/raise
     stmts = list(node.body)
-    if stmts and isinstance(stmts[0], ast.Expr) and isinstance(
-        getattr(stmts[0], "value", None), ast.Constant
+    if (
+        stmts
+        and isinstance(stmts[0], ast.Expr)
+        and isinstance(getattr(stmts[0], "value", None), ast.Constant)
     ):
         stmts = stmts[1:]
     if not stmts:
@@ -103,8 +101,8 @@ def _is_stub_function(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
         s = stmts[0]
         if isinstance(s, ast.Pass):
             return True
-        if isinstance(s, ast.Expr) and isinstance(getattr(s, "value", None), ast.Constant):
-            if s.value.value is ...:  # type: ignore[union-attr]
+        if isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant):
+            if s.value.value is ...:
                 return True
         if isinstance(s, ast.Raise):
             # raise NotImplementedError(...)
@@ -122,11 +120,27 @@ def _path_consistency(task: Task) -> list[str]:
     paths = set(task.starter_files.keys())
     # imports in tests referencing modules that aren't seeded
     for tpath, body in _test_files(task).items():
-        for m in re.finditer(
-            r"^\s*(?:from|import)\s+([a-zA-Z_][\w.]*)", body, re.M
-        ):
+        for m in re.finditer(r"^\s*(?:from|import)\s+([a-zA-Z_][\w.]*)", body, re.M):
             mod = m.group(1).split(".")[0]
-            if mod in {"pytest", "unittest", "typing", "collections", "json", "os", "sys", "re", "math", "time", "pathlib", "dataclasses", "enum", "functools", "itertools", "copy", "random"}:
+            if mod in {
+                "pytest",
+                "unittest",
+                "typing",
+                "collections",
+                "json",
+                "os",
+                "sys",
+                "re",
+                "math",
+                "time",
+                "pathlib",
+                "dataclasses",
+                "enum",
+                "functools",
+                "itertools",
+                "copy",
+                "random",
+            }:
                 continue
             # accept src.mod or mod.py
             candidates = {
@@ -159,8 +173,7 @@ def _description_mentions_paths(task: Task) -> list[str]:
     if any(b in desc for b in basenames):
         return []
     return [
-        "description does not mention any starter_files path "
-        f"(expected one of {sorted(files)[:5]})"
+        f"description does not mention any starter_files path (expected one of {sorted(files)[:5]})"
     ]
 
 

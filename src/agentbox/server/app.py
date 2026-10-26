@@ -13,8 +13,6 @@ Trainers on GPU nodes drive environments hosted on CPU/Docker nodes::
 Optional bearer auth (``AGENTBOX_SERVER_TOKEN``), a session cap and an idle reaper.
 """
 
-
-
 import asyncio
 import contextlib
 import logging
@@ -84,7 +82,9 @@ def create_app(settings: ServerSettings | None = None) -> Any:
             yield
         finally:
             task.cancel()
-            await asyncio.gather(*(s.env.close() for s in sessions.values()), return_exceptions=True)
+            await asyncio.gather(
+                *(s.env.close() for s in sessions.values()), return_exceptions=True
+            )
             sessions.clear()
 
     app = FastAPI(title="AgentBox environment server", lifespan=lifespan)
@@ -156,10 +156,16 @@ def create_app(settings: ServerSettings | None = None) -> Any:
     async def tool(sid: str, body: dict[str, Any]) -> dict[str, Any]:
         s = get(sid)
         async with s.lock:
-            out = await s.env.call_tool(body["name"], body.get("arguments", {}), call_id=body.get("call_id"))
+            out = await s.env.call_tool(
+                body["name"], body.get("arguments", {}), call_id=body.get("call_id")
+            )
         counters["tool_calls"] += 1
-        return {"content": out.message.content, "is_error": out.record.is_error,
-                "terminal": out.terminal, "duration_s": out.record.duration_s}
+        return {
+            "content": out.message.content,
+            "is_error": out.record.is_error,
+            "terminal": out.terminal,
+            "duration_s": out.record.duration_s,
+        }
 
     @app.post("/v1/sessions/{sid}/evaluate", dependencies=[Depends(auth)])
     async def evaluate(sid: str) -> dict[str, Any]:

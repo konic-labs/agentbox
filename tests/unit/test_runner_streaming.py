@@ -30,8 +30,15 @@ def _task(tid: str) -> Task:
     return Task(task_id=tid, description="d", verifier=VerifierSpec(type=VerifierType.PYTEST))
 
 
-def _traj(task_id: str, sample: int = 0, *, ok: bool = True, kind: FailureKind = FailureKind.NONE,
-          reward: float | None = None, duration: float = 1.0) -> Trajectory:
+def _traj(
+    task_id: str,
+    sample: int = 0,
+    *,
+    ok: bool = True,
+    kind: FailureKind = FailureKind.NONE,
+    reward: float | None = None,
+    duration: float = 1.0,
+) -> Trajectory:
     return Trajectory(
         task_id=task_id,
         run_id="run",
@@ -49,7 +56,13 @@ def _traj(task_id: str, sample: int = 0, *, ok: bool = True, kind: FailureKind =
 @pytest.fixture
 def fake_rollout(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Replace Rollout.run; failures scripted per (task_id, sample, attempt)."""
-    state: dict[str, Any] = {"calls": [], "infra_once": set(), "fail": set(), "inflight": 0, "peak": 0}
+    state: dict[str, Any] = {
+        "calls": [],
+        "infra_once": set(),
+        "fail": set(),
+        "inflight": 0,
+        "peak": 0,
+    }
 
     async def fake_run(task: Task, **kw: Any) -> Trajectory:
         key = (task.task_id, kw["sample_index"])
@@ -94,7 +107,10 @@ async def test_persistent_infra_failure_is_not_trainable(fake_rollout: dict[str,
 
 
 async def test_stream_groups_and_run_groups(fake_rollout: dict[str, Any]) -> None:
-    groups = [g async for g in _runner(concurrency=4).stream_groups([_task("a"), _task("b")], group_size=3)]
+    groups = [
+        g
+        async for g in _runner(concurrency=4).stream_groups([_task("a"), _task("b")], group_size=3)
+    ]
     assert sorted(len(g) for g in groups) == [3, 3]
     for g in groups:
         assert [t.sample_index for t in g] == [0, 1, 2]

@@ -14,17 +14,30 @@ from agentbox.integrations.art import to_art_dict
 from agentbox.integrations.verl import build_agent_loop_class, tasks_to_verl_rows
 from agentbox.tasks.schema import Task, VerifierSpec
 from agentbox.tito import ChatTokenizer, GenOutput, TitoModelClient
-from agentbox.trajectory.schema import FunctionCall, Message, ToolCall, Trajectory, TrajectoryMetrics
+from agentbox.trajectory.schema import (
+    FunctionCall,
+    Message,
+    ToolCall,
+    Trajectory,
+    TrajectoryMetrics,
+)
 from agentbox.trajectory.tokens import TokenTracker
 from agentbox.types import FailureKind, FinalStatus, VerifierType
 
 
-def _traj(task: str, sample: int, reward: float, *, kind: FailureKind = FailureKind.NONE) -> Trajectory:
+def _traj(
+    task: str, sample: int, reward: float, *, kind: FailureKind = FailureKind.NONE
+) -> Trajectory:
     msgs = [
         Message(role="system", content="sys"),
         Message(role="user", content=f"do {task}"),
-        Message(role="assistant", content=None,
-                tool_calls=[ToolCall(id="c1", function=FunctionCall(name="list_files", arguments="{}"))]),
+        Message(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(id="c1", function=FunctionCall(name="list_files", arguments="{}"))
+            ],
+        ),
         Message(role="tool", content="a.py", tool_call_id="c1", name="list_files"),
         Message(role="assistant", content=f"done {reward}"),
     ]
@@ -32,11 +45,17 @@ def _traj(task: str, sample: int, reward: float, *, kind: FailureKind = FailureK
     msgs[2].tokens = tracker.observe([1, 2, 3], [10, 11], [-0.5, -0.5])
     msgs[4].tokens = tracker.observe([1, 2, 3, 10, 11, 20], [12], [-0.1])
     return Trajectory(
-        task_id=task, run_id="r", rollout_id=f"{task}-{sample}", group_id=f"{task}@r",
-        sample_index=sample, messages=msgs, reward=reward,
+        task_id=task,
+        run_id="r",
+        rollout_id=f"{task}-{sample}",
+        group_id=f"{task}@r",
+        sample_index=sample,
+        messages=msgs,
+        reward=reward,
         final_status=FinalStatus.SUCCESS if reward >= 1 else FinalStatus.FAILED,
         failure_kind=kind if reward < 1 else FailureKind.NONE,
-        metrics=TrajectoryMetrics(steps=1), tools=[{"type": "function", "function": {"name": "list_files"}}],
+        metrics=TrajectoryMetrics(steps=1),
+        tools=[{"type": "function", "function": {"name": "list_files"}}],
     )
 
 
@@ -87,8 +106,14 @@ class QwenLikeTokenizer:
 
     SPECIAL = ["<|im_start|>", "<|im_end|>"]
 
-    def apply_chat_template(self, messages: list[dict[str, Any]], tools: Any = None,
-                            add_generation_prompt: bool = False, tokenize: bool = False, **kw: Any) -> str:
+    def apply_chat_template(
+        self,
+        messages: list[dict[str, Any]],
+        tools: Any = None,
+        add_generation_prompt: bool = False,
+        tokenize: bool = False,
+        **kw: Any,
+    ) -> str:
         out = []
         if tools:
             out.append("<|im_start|>system\nTOOLS<|im_end|>\n")
@@ -122,29 +147,40 @@ class QwenLikeTokenizer:
 async def test_tito_client_keeps_one_prefix_consistent_sequence() -> None:
     tok = QwenLikeTokenizer()
     chat = ChatTokenizer(tok)
-    replies = iter([
-        '<tool_call>{"name": "list_files", "arguments": {}}</tool_call><|im_end|>',
-        "all done<|im_end|>",
-    ])
+    replies = iter(
+        [
+            '<tool_call>{"name": "list_files", "arguments": {}}</tool_call><|im_end|>',
+            "all done<|im_end|>",
+        ]
+    )
 
     async def generate(prompt_ids: list[int], sampling: dict[str, Any]) -> GenOutput:
         text = next(replies)
-        return GenOutput(token_ids=tok.encode(text), text=text.replace("<|im_end|>", ""),
-                         logprobs=[-0.1] * len(tok.encode(text)))
+        return GenOutput(
+            token_ids=tok.encode(text),
+            text=text.replace("<|im_end|>", ""),
+            logprobs=[-0.1] * len(tok.encode(text)),
+        )
 
     client = TitoModelClient(chat, generate)
     msgs = [{"role": "system", "content": "S"}, {"role": "user", "content": "go"}]
     r1 = await client.complete(msgs, tools=[{"type": "function"}])
     assert r1.tool_calls and r1.tool_calls[0].function.name == "list_files"
-    msgs2 = [*msgs, {"role": "assistant", "content": r1.content},
-             {"role": "tool", "content": "a.py", "tool_call_id": r1.tool_calls[0].id}]
+    msgs2 = [
+        *msgs,
+        {"role": "assistant", "content": r1.content},
+        {"role": "tool", "content": "a.py", "tool_call_id": r1.tool_calls[0].id},
+    ]
     r2 = await client.complete(msgs2, tools=[{"type": "function"}])
     tracker = TokenTracker()
     t1 = tracker.observe(r1.prompt_token_ids, r1.completion_token_ids, r1.completion_logprobs)
     t2 = tracker.observe(r2.prompt_token_ids, r2.completion_token_ids, r2.completion_logprobs)
     assert t2 is not None and not t2.prefix_break  # no re-rendering => one sequence
     delta = tok.decode(t2.prompt_ids or [])
-    assert delta == "\n<|im_start|>user\n<tool_response>a.py</tool_response><|im_end|>\n<|im_start|>assistant\n"
+    assert (
+        delta
+        == "\n<|im_start|>user\n<tool_response>a.py</tool_response><|im_end|>\n<|im_start|>assistant\n"
+    )
     assert t1 is not None
 
 
@@ -165,9 +201,13 @@ async def test_verl_agent_loop_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
             return SimpleNamespace(message=SimpleNamespace(content=f"ran {name}"))
 
         async def evaluate(self) -> Any:
-            return SimpleNamespace(reward=0.75, success=False,
-                                   final_status=FinalStatus.FAILED, failure_kind=FailureKind.POLICY,
-                                   breakdown={"verifier": 0.75})
+            return SimpleNamespace(
+                reward=0.75,
+                success=False,
+                final_status=FinalStatus.FAILED,
+                failure_kind=FailureKind.POLICY,
+                breakdown={"verifier": 0.75},
+            )
 
         async def close(self) -> None:
             calls.append(("close",))
@@ -177,7 +217,9 @@ async def test_verl_agent_loop_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
             pass
 
         async def run(self, sampling_params: dict[str, Any], **kwargs: Any) -> Any:
-            resp, _, _ = await self._call_tool(SimpleNamespace(name="read_file", arguments='{"path": "x"}'), {}, None)
+            resp, _, _ = await self._call_tool(
+                SimpleNamespace(name="read_file", arguments='{"path": "x"}'), {}, None
+            )
             return SimpleNamespace(reward_score=None, extra_fields={"tool_text": resp})
 
     monkeypatch.setattr(verl_mod, "AgentBoxEnv", FakeEnv)

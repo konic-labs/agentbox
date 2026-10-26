@@ -26,7 +26,9 @@ class AgentBoxTextEnvCore:
 
     def __init__(self, task: Task, *, settings: Settings | None = None) -> None:
         cfg = settings or load_settings(os.environ.get("AGENTBOX_SKYRL_CONFIG"))
-        agent = cfg.agent.model_copy(update={"tool_protocol": "hermes", "tool_response_role": "user"})
+        agent = cfg.agent.model_copy(
+            update={"tool_protocol": "hermes", "tool_response_role": "user"}
+        )
         self.task = task
         self.env = SyncAgentBoxEnv(sandbox=cfg.sandbox, agent=agent, rewards=cfg.rewards)
         self.turns = 0
@@ -34,7 +36,10 @@ class AgentBoxTextEnvCore:
 
     def init(self, prompt: Any = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         obs = self.env.reset(self.task)
-        return obs.messages, {"task_id": self.task.task_id, "tools": [t["function"]["name"] for t in obs.tools]}
+        return obs.messages, {
+            "task_id": self.task.task_id,
+            "tools": [t["function"]["name"] for t in obs.tools],
+        }
 
     def step(self, action: str) -> dict[str, Any]:
         self.turns += 1
@@ -61,7 +66,7 @@ class AgentBoxTextEnvCore:
 def _build() -> type:
     from skyrl_gym.envs.base_text_env import BaseTextEnv
 
-    class AgentBoxTextEnv(BaseTextEnv):  # type: ignore[misc, valid-type]
+    class AgentBoxTextEnv(BaseTextEnv):  # type: ignore[misc]
         def __init__(self, env_config: Any = None, extras: dict[str, Any] | None = None) -> None:
             super().__init__()
             extras = extras or {}

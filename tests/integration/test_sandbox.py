@@ -97,11 +97,7 @@ async def test_concurrent_timeouts_do_not_starve(manager: SandboxManager) -> Non
     )
     try:
         await asyncio.gather(
-            *(
-                manager.exec(sb, "sleep 600", timeout_s=1.0)
-                for sb in sandboxes
-                for _ in range(6)
-            )
+            *(manager.exec(sb, "sleep 600", timeout_s=1.0) for sb in sandboxes for _ in range(6))
         )
         t0 = time.monotonic()
         res = await manager.exec(sandboxes[0], "echo hi", timeout_s=30)

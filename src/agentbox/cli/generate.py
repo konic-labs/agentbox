@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Literal, cast
 
 import typer
 
@@ -36,41 +36,62 @@ def _teacher(
         model,
         base_url if base_url is not None else (t.base_url if t else None),
         api_key if api_key is not None else (t.api_key if t else None),
-        int(max_tokens if max_tokens is not None else ((t.max_tokens if t else None) or g.max_tokens)),
+        int(
+            max_tokens
+            if max_tokens is not None
+            else ((t.max_tokens if t else None) or g.max_tokens)
+        ),
         bool(use_dspy if use_dspy is not None else g.use_dspy),
         bool(llm_judge if llm_judge is not None else g.llm_judge),
         float(min_score if min_score is not None else g.min_score),
     )
 
 
-def _gen_config(model: str, base_url: str | None, api_key: str | None, max_tokens: int,
-                use_dspy: bool, llm_judge: bool, docker_qc: bool, min_score: float,
-                *, two_stage: bool = False) -> Any:
+def _gen_config(
+    model: str,
+    base_url: str | None,
+    api_key: str | None,
+    max_tokens: int,
+    use_dspy: bool,
+    llm_judge: bool,
+    docker_qc: bool,
+    min_score: float,
+    *,
+    two_stage: bool = False,
+) -> Any:
     from agentbox.tasks.generate import GenerateConfig
 
     return GenerateConfig(
-        model=model, base_url=base_url, api_key=api_key or "EMPTY", max_tokens=max_tokens,
-        temperature=0.6, validate_in_docker=docker_qc, validate_with_llm=llm_judge,
-        llm_judge_min_score=min_score, use_dspy=use_dspy, disable_thinking=True,
-        max_retries=2, two_stage=two_stage,
+        model=model,
+        base_url=base_url,
+        api_key=api_key or "EMPTY",
+        max_tokens=max_tokens,
+        temperature=0.6,
+        validate_in_docker=docker_qc,
+        validate_with_llm=llm_judge,
+        llm_judge_min_score=min_score,
+        use_dspy=use_dspy,
+        disable_thinking=True,
+        max_retries=2,
+        two_stage=two_stage,
     )
 
 
 @generate_app.command("one")
 def generate_one(
     ctx: typer.Context,
-    model: Annotated[Optional[str], typer.Option("--model", "-m")] = None,
-    base_url: Annotated[Optional[str], typer.Option("--base-url")] = None,
-    api_key: Annotated[Optional[str], typer.Option("--api-key", envvar="OPENAI_API_KEY")] = None,
+    model: Annotated[str | None, typer.Option("--model", "-m")] = None,
+    base_url: Annotated[str | None, typer.Option("--base-url")] = None,
+    api_key: Annotated[str | None, typer.Option("--api-key", envvar="OPENAI_API_KEY")] = None,
     difficulty: Annotated[str, typer.Option("--difficulty")] = "easy",
     domain: Annotated[str, typer.Option("--domain")] = "python",
     constraints: Annotated[str, typer.Option("--constraints")] = "",
     out: Annotated[Path, typer.Option("--out", "-o")] = Path("generated/tasks"),
-    max_tokens: Annotated[Optional[int], typer.Option("--max-tokens")] = None,
-    use_dspy: Annotated[Optional[bool], typer.Option("--dspy/--no-dspy")] = None,
+    max_tokens: Annotated[int | None, typer.Option("--max-tokens")] = None,
+    use_dspy: Annotated[bool | None, typer.Option("--dspy/--no-dspy")] = None,
     docker_qc: Annotated[bool, typer.Option("--docker-qc/--no-docker-qc")] = True,
-    llm_judge: Annotated[Optional[bool], typer.Option("--llm-judge/--no-llm-judge")] = None,
-    min_score: Annotated[Optional[float], typer.Option("--min-score")] = None,
+    llm_judge: Annotated[bool | None, typer.Option("--llm-judge/--no-llm-judge")] = None,
+    min_score: Annotated[float | None, typer.Option("--min-score")] = None,
     static_qc: Annotated[bool, typer.Option("--static-qc/--no-static-qc")] = True,
     two_stage: Annotated[bool, typer.Option("--two-stage/--no-two-stage")] = False,
 ) -> None:
@@ -79,14 +100,20 @@ def generate_one(
     from agentbox.tasks.generate.static_qc import validate_task_static
 
     st = state(ctx)
-    m, b, k, mt, dspy, judge, score = _teacher(st, model, base_url, api_key, max_tokens, use_dspy,
-                                               llm_judge, min_score)
-    gen = TaskGenerator(_gen_config(m, b, k, mt, dspy, judge, docker_qc, score, two_stage=two_stage))
+    m, b, k, mt, dspy, judge, score = _teacher(
+        st, model, base_url, api_key, max_tokens, use_dspy, llm_judge, min_score
+    )
+    gen = TaskGenerator(
+        _gen_config(m, b, k, mt, dspy, judge, docker_qc, score, two_stage=two_stage)
+    )
 
     async def go() -> Any:
         try:
-            task = await gen.generate(difficulty=difficulty, domain=domain,  # type: ignore[arg-type]
-                                      constraints=constraints or None)
+            task = await gen.generate(
+                difficulty=cast(Literal["easy", "medium", "hard"], difficulty),
+                domain=domain,
+                constraints=constraints or None,
+            )
         finally:
             await gen.aclose()
         if static_qc:
@@ -99,28 +126,34 @@ def generate_one(
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"{task.task_id}.json"
     task.save_json(path)
-    emit(st, {"path": str(path), "files": sorted(task.starter_files),
-              "llm_judge_score": task.metadata.get("llm_judge_score")},
-         lambda: typer.echo(f"wrote {path} files={sorted(task.starter_files)}"))
+    emit(
+        st,
+        {
+            "path": str(path),
+            "files": sorted(task.starter_files),
+            "llm_judge_score": task.metadata.get("llm_judge_score"),
+        },
+        lambda: typer.echo(f"wrote {path} files={sorted(task.starter_files)}"),
+    )
 
 
 @generate_app.command("batch")
 def generate_batch(
     ctx: typer.Context,
-    model: Annotated[Optional[str], typer.Option("--model", "-m")] = None,
-    base_url: Annotated[Optional[str], typer.Option("--base-url")] = None,
-    api_key: Annotated[Optional[str], typer.Option("--api-key", envvar="OPENAI_API_KEY")] = None,
-    target: Annotated[Optional[int], typer.Option("--target", "-n")] = None,
+    model: Annotated[str | None, typer.Option("--model", "-m")] = None,
+    base_url: Annotated[str | None, typer.Option("--base-url")] = None,
+    api_key: Annotated[str | None, typer.Option("--api-key", envvar="OPENAI_API_KEY")] = None,
+    target: Annotated[int | None, typer.Option("--target", "-n")] = None,
     out: Annotated[Path, typer.Option("--out", "-o")] = Path("generated/tasks"),
-    concurrency: Annotated[Optional[int], typer.Option("--concurrency", "-c")] = None,
-    docker_concurrency: Annotated[Optional[int], typer.Option("--docker-concurrency")] = None,
-    max_tokens: Annotated[Optional[int], typer.Option("--max-tokens")] = None,
-    use_dspy: Annotated[Optional[bool], typer.Option("--dspy/--no-dspy")] = None,
+    concurrency: Annotated[int | None, typer.Option("--concurrency", "-c")] = None,
+    docker_concurrency: Annotated[int | None, typer.Option("--docker-concurrency")] = None,
+    max_tokens: Annotated[int | None, typer.Option("--max-tokens")] = None,
+    use_dspy: Annotated[bool | None, typer.Option("--dspy/--no-dspy")] = None,
     docker_qc: Annotated[bool, typer.Option("--docker-qc/--no-docker-qc")] = True,
-    llm_judge: Annotated[Optional[bool], typer.Option("--llm-judge/--no-llm-judge")] = None,
+    llm_judge: Annotated[bool | None, typer.Option("--llm-judge/--no-llm-judge")] = None,
     static_qc: Annotated[bool, typer.Option("--static-qc/--no-static-qc")] = True,
-    min_score: Annotated[Optional[float], typer.Option("--min-score")] = None,
-    constraints_file: Annotated[Optional[Path], typer.Option("--constraints-file")] = None,
+    min_score: Annotated[float | None, typer.Option("--min-score")] = None,
+    constraints_file: Annotated[Path | None, typer.Option("--constraints-file")] = None,
     two_stage: Annotated[bool, typer.Option("--two-stage/--no-two-stage")] = False,
     dedup: Annotated[bool, typer.Option("--dedup/--no-dedup")] = True,
     strict_paths: Annotated[bool, typer.Option("--strict-paths")] = False,
@@ -130,15 +163,18 @@ def generate_batch(
 
     st = state(ctx)
     g = st.project.generate
-    m, b, k, mt, dspy, judge, score = _teacher(st, model, base_url, api_key, max_tokens, use_dspy,
-                                               llm_judge, min_score)
+    m, b, k, mt, dspy, judge, score = _teacher(
+        st, model, base_url, api_key, max_tokens, use_dspy, llm_judge, min_score
+    )
     gen_cfg = _gen_config(m, b, k, mt, dspy, False, False, score, two_stage=two_stage)
     n = int(target if target is not None else g.target)
     batch = BatchGenerateConfig(
         target=n,
         out_dir=out,
         gen_concurrency=int(concurrency if concurrency is not None else g.concurrency),
-        docker_concurrency=int(docker_concurrency if docker_concurrency is not None else g.docker_concurrency),
+        docker_concurrency=int(
+            docker_concurrency if docker_concurrency is not None else g.docker_concurrency
+        ),
         enable_docker_qc=docker_qc,
         enable_llm_qc=judge,
         enable_static_qc=static_qc,
@@ -149,8 +185,11 @@ def generate_batch(
     )
     log = (lambda msg: None) if st.json else (lambda msg: typer.echo(msg))
     tasks = asyncio.run(batch_generate(gen_cfg, batch, progress=log))
-    emit(st, {"generated": len(tasks), "target": n, "out": str(out)},
-         lambda: typer.echo(f"generated {len(tasks)}/{n} → {out}"))
+    emit(
+        st,
+        {"generated": len(tasks), "target": n, "out": str(out)},
+        lambda: typer.echo(f"generated {len(tasks)}/{n} → {out}"),
+    )
     raise typer.Exit(EXIT_OK if len(tasks) >= n else EXIT_FAILURES)
 
 
@@ -159,8 +198,8 @@ def generate_validate_llm(
     ctx: typer.Context,
     tasks_dir: Annotated[Path, typer.Argument(help="Directory of task JSON files")],
     model: Annotated[str, typer.Option("--model", "-m")],
-    base_url: Annotated[Optional[str], typer.Option("--base-url")] = None,
-    api_key: Annotated[Optional[str], typer.Option("--api-key", envvar="OPENAI_API_KEY")] = None,
+    base_url: Annotated[str | None, typer.Option("--base-url")] = None,
+    api_key: Annotated[str | None, typer.Option("--api-key", envvar="OPENAI_API_KEY")] = None,
     min_score: Annotated[float, typer.Option("--min-score")] = 0.65,
     out: Annotated[Path, typer.Option("--out", "-o")] = Path("generated/llm_audit.jsonl"),
     use_dspy: Annotated[bool, typer.Option("--dspy/--no-dspy")] = True,
@@ -174,7 +213,9 @@ def generate_validate_llm(
     tasks = list(iter_tasks(tasks_dir))
     if not tasks:
         fail(f"no tasks in {tasks_dir}")
-    gen = TaskGenerator(_gen_config(model, base_url, api_key, 2048, use_dspy, True, False, min_score))
+    gen = TaskGenerator(
+        _gen_config(model, base_url, api_key, 2048, use_dspy, True, False, min_score)
+    )
 
     async def go() -> list[dict[str, Any]]:
         sem = asyncio.Semaphore(concurrency)
@@ -182,8 +223,13 @@ def generate_validate_llm(
         async def one(t: Any) -> dict[str, Any]:
             async with sem:
                 rep = await gen.validate_task_llm_only(t)
-                return {"task_id": t.task_id, "ok": rep.ok, "llm_score": rep.llm_score,
-                        "errors": rep.errors, "reasons": rep.llm_reasons}
+                return {
+                    "task_id": t.task_id,
+                    "ok": rep.ok,
+                    "llm_score": rep.llm_score,
+                    "errors": rep.errors,
+                    "reasons": rep.llm_reasons,
+                }
 
         try:
             return await asyncio.gather(*(one(t) for t in tasks))
@@ -194,8 +240,11 @@ def generate_validate_llm(
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
     rejected = sum(1 for r in rows if not r["ok"])
-    emit(st, {"accepted": len(rows) - rejected, "rejected": rejected, "out": str(out)},
-         lambda: typer.echo(f"accept={len(rows) - rejected} reject={rejected} → {out}"))
+    emit(
+        st,
+        {"accepted": len(rows) - rejected, "rejected": rejected, "out": str(out)},
+        lambda: typer.echo(f"accept={len(rows) - rejected} reject={rejected} → {out}"),
+    )
     raise typer.Exit(EXIT_FAILURES if rejected else EXIT_OK)
 
 

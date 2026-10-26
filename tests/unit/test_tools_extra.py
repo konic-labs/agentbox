@@ -89,7 +89,12 @@ async def test_apply_patch_tool_is_all_or_nothing() -> None:
 
 def test_decorator_rich_schema_and_docstring() -> None:
     @tool()
-    async def search(sandbox: Any, query: str, mode: Literal["fast", "exact"] = "fast", tags: list[str] | None = None) -> str:
+    async def search(
+        sandbox: Any,
+        query: str,
+        mode: Literal["fast", "exact"] = "fast",
+        tags: list[str] | None = None,
+    ) -> str:
         """Search things.
 
         Args:
@@ -123,7 +128,12 @@ async def test_decorator_sync_function_and_ctx() -> None:
 
 def test_registry_modes_and_drop_keeps_one() -> None:
     assert build_tool_registry(ToolMode.STRUCTURED).names() == [
-        "list_files", "read_file", "write_file", "edit_file", "run_command", "run_tests"
+        "list_files",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "run_command",
+        "run_tests",
     ]
     ext = build_tool_registry("extended").names()
     assert {"search_files", "apply_patch", "submit"} <= set(ext)
@@ -143,7 +153,9 @@ def test_schemas_cached_until_change() -> None:
 
 
 def test_prompt_override_with_braces() -> None:
-    out = render_system_prompt(override='Reply as {"ok": true} in {workspace_dir}', workspace_dir="/w")
+    out = render_system_prompt(
+        override='Reply as {"ok": true} in {workspace_dir}', workspace_dir="/w"
+    )
     assert out == 'Reply as {"ok": true} in /w'
     assert "submit" in render_system_prompt(mode=ToolMode.EXTENDED)
 

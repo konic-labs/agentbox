@@ -6,9 +6,9 @@ import asyncio
 import hashlib
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any
 
 import typer
 
@@ -58,38 +58,69 @@ def _coerce(v: str) -> Any:
 
 def run(
     ctx: typer.Context,
-    tasks: Annotated[list[Path], typer.Argument(help="Task files, task dirs, datasets (*.jsonl[.gz], *.parquet)")],
-    model: Annotated[Optional[str], typer.Option("--model", "-m", help="Model id (or use --profile)")] = None,
-    base_url: Annotated[Optional[str], typer.Option("--base-url", help="OpenAI-compatible endpoint")] = None,
-    api_key_env: Annotated[Optional[str], typer.Option("--api-key-env", help="Env var holding the API key")] = None,
-    mock: Annotated[bool, typer.Option("--mock", help="No-op model (pipeline smoke tests)")] = False,
+    tasks: Annotated[
+        list[Path], typer.Argument(help="Task files, task dirs, datasets (*.jsonl[.gz], *.parquet)")
+    ],
+    model: Annotated[
+        str | None, typer.Option("--model", "-m", help="Model id (or use --profile)")
+    ] = None,
+    base_url: Annotated[
+        str | None, typer.Option("--base-url", help="OpenAI-compatible endpoint")
+    ] = None,
+    api_key_env: Annotated[
+        str | None, typer.Option("--api-key-env", help="Env var holding the API key")
+    ] = None,
+    mock: Annotated[
+        bool, typer.Option("--mock", help="No-op model (pipeline smoke tests)")
+    ] = False,
     tito: Annotated[
-        Optional[str],
-        typer.Option("--tito", help="Token-in/token-out via /v1/completions with this HF tokenizer"),
+        str | None,
+        typer.Option(
+            "--tito", help="Token-in/token-out via /v1/completions with this HF tokenizer"
+        ),
     ] = None,
     n: Annotated[int, typer.Option("--n", "-n", help="Rollouts per task (GRPO group size)")] = 1,
     concurrency: Annotated[int, typer.Option("--concurrency", "-c")] = 8,
-    model_concurrency: Annotated[Optional[int], typer.Option("--model-concurrency")] = None,
-    out: Annotated[Optional[Path], typer.Option("--out", "-o", help="Run directory")] = None,
-    resume: Annotated[bool, typer.Option("--resume", help="Skip rollouts already in --out")] = False,
-    force: Annotated[bool, typer.Option("--force", help="Resume even if the config changed")] = False,
-    compress: Annotated[bool, typer.Option("--compress/--no-compress", help="Write .jsonl.gz")] = False,
-    limit: Annotated[Optional[int], typer.Option("--limit", help="Only the first N tasks")] = None,
-    tools: Annotated[Optional[str], typer.Option("--tools", help="structured|extended|shell|custom")] = None,
-    max_steps: Annotated[Optional[int], typer.Option("--max-steps")] = None,
-    temperature: Annotated[Optional[float], typer.Option("--temperature")] = None,
-    max_tokens: Annotated[Optional[int], typer.Option("--max-tokens")] = None,
-    capture_tokens: Annotated[bool, typer.Option("--capture-tokens", help="Record token ids + logprobs")] = False,
-    image: Annotated[Optional[str], typer.Option("--image")] = None,
-    network: Annotated[Optional[bool], typer.Option("--network/--no-network")] = None,
-    reward: Annotated[Optional[list[str]], typer.Option("--reward", help="name[:weight][,k=v] (repeat)")] = None,
-    seed: Annotated[Optional[int], typer.Option("--seed")] = None,
+    model_concurrency: Annotated[int | None, typer.Option("--model-concurrency")] = None,
+    out: Annotated[Path | None, typer.Option("--out", "-o", help="Run directory")] = None,
+    resume: Annotated[
+        bool, typer.Option("--resume", help="Skip rollouts already in --out")
+    ] = False,
+    force: Annotated[
+        bool, typer.Option("--force", help="Resume even if the config changed")
+    ] = False,
+    compress: Annotated[
+        bool, typer.Option("--compress/--no-compress", help="Write .jsonl.gz")
+    ] = False,
+    limit: Annotated[int | None, typer.Option("--limit", help="Only the first N tasks")] = None,
+    tools: Annotated[
+        str | None, typer.Option("--tools", help="structured|extended|shell|custom")
+    ] = None,
+    max_steps: Annotated[int | None, typer.Option("--max-steps")] = None,
+    temperature: Annotated[float | None, typer.Option("--temperature")] = None,
+    max_tokens: Annotated[int | None, typer.Option("--max-tokens")] = None,
+    capture_tokens: Annotated[
+        bool, typer.Option("--capture-tokens", help="Record token ids + logprobs")
+    ] = False,
+    image: Annotated[str | None, typer.Option("--image")] = None,
+    network: Annotated[bool | None, typer.Option("--network/--no-network")] = None,
+    reward: Annotated[
+        list[str] | None, typer.Option("--reward", help="name[:weight][,k=v] (repeat)")
+    ] = None,
+    seed: Annotated[int | None, typer.Option("--seed")] = None,
     retries: Annotated[int, typer.Option("--retries", help="Retries for infra failures")] = 1,
-    keep_failed: Annotated[bool, typer.Option("--keep-failed", help="Keep sandboxes of failed rollouts")] = False,
-    min_success_rate: Annotated[Optional[float], typer.Option("--min-success-rate")] = None,
+    keep_failed: Annotated[
+        bool, typer.Option("--keep-failed", help="Keep sandboxes of failed rollouts")
+    ] = False,
+    min_success_rate: Annotated[float | None, typer.Option("--min-success-rate")] = None,
     progress: Annotated[bool, typer.Option("--progress/--no-progress")] = True,
 ) -> None:
-    from agentbox.config import AgentConfig, ModelConfig, ResourceLimits, RolloutConfig, SandboxConfig
+    from agentbox.config import (
+        AgentConfig,
+        ModelConfig,
+        RolloutConfig,
+        SandboxConfig,
+    )
     from agentbox.errors import TaskValidationError
     from agentbox.model.base import ModelResponse
     from agentbox.model.mock import MockModelClient
@@ -192,7 +223,7 @@ def run(
             )
     manifest = {
         "agentbox": __version__,
-        "started_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": datetime.now(UTC).isoformat(),
         "config_hash": config_hash,
         "tasks": [str(p) for p in tasks],
         "n_tasks": len(task_list),
@@ -224,16 +255,38 @@ def run(
     def human() -> None:
         typer.echo(f"run {summary.run_id[:8]} → {traj_path}")
         table(
-            ["rollouts", "skipped", "success", "mean reward", "mean steps", "p90 dur (s)", "infra", "rollouts/min"],
-            [[summary.n, summary.skipped, fmt_pct(m.success_rate), f"{m.mean_reward:.3f}",
-              f"{m.mean_steps:.1f}", f"{m.p90_duration_s:.1f}", m.infra_failures,
-              f"{summary.rollouts_per_min:.1f}"]],
+            [
+                "rollouts",
+                "skipped",
+                "success",
+                "mean reward",
+                "mean steps",
+                "p90 dur (s)",
+                "infra",
+                "rollouts/min",
+            ],
+            [
+                [
+                    summary.n,
+                    summary.skipped,
+                    fmt_pct(m.success_rate),
+                    f"{m.mean_reward:.3f}",
+                    f"{m.mean_steps:.1f}",
+                    f"{m.p90_duration_s:.1f}",
+                    m.infra_failures,
+                    f"{summary.rollouts_per_min:.1f}",
+                ]
+            ],
         )
         if m.by_failure_kind:
             typer.echo(f"failure kinds: {m.by_failure_kind}")
         typer.echo(f"wall clock {time.monotonic() - t0:.1f}s")
 
-    emit(st, {"out": str(out), "trajectories": str(traj_path), **summary.model_dump(mode="json")}, human)
+    emit(
+        st,
+        {"out": str(out), "trajectories": str(traj_path), **summary.model_dump(mode="json")},
+        human,
+    )
     if min_success_rate is not None and m.success_rate < min_success_rate:
         raise typer.Exit(EXIT_FAILURES)
     raise typer.Exit(EXIT_OK)

@@ -70,8 +70,9 @@ class VerifyResult(BaseModel):
 
 
 def _matches(path: str, patterns: list[str]) -> bool:
-    return any(fnmatch.fnmatch(path, p) or fnmatch.fnmatch(posixpath.basename(path), p)
-               for p in patterns)
+    return any(
+        fnmatch.fnmatch(path, p) or fnmatch.fnmatch(posixpath.basename(path), p) for p in patterns
+    )
 
 
 def _is_pytest(command: str) -> bool:
@@ -161,7 +162,9 @@ class Verifier:
             opts.append(f"--junitxml={shlex.quote(junit_path)}")
         return " ".join(opts) if opts else None
 
-    async def check_tamper(self, sandbox: Sandbox, spec: VerifierSpec, task: Task | None) -> list[str]:
+    async def check_tamper(
+        self, sandbox: Sandbox, spec: VerifierSpec, task: Task | None
+    ) -> list[str]:
         """Restore protected files and remove forbidden new files; return touched paths."""
         mgr = self.manager
         tampered: list[str] = []
@@ -187,7 +190,7 @@ class Verifier:
             prefix = sandbox.workspace_dir.rstrip("/") + "/"
             offenders = []
             for line in res.stdout.splitlines():
-                rel = line.strip()[len(prefix):] if line.startswith(prefix) else line.strip()
+                rel = line.strip()[len(prefix) :] if line.startswith(prefix) else line.strip()
                 if rel and rel not in baseline and _matches(rel, spec.forbid_new_files):
                     offenders.append(rel)
             if offenders:
@@ -268,7 +271,9 @@ class Verifier:
             details["tampered"] = tampered
             if spec.on_tamper == "fail":
                 success = False
-                reward = spec.tamper_reward if spec.tamper_reward is not None else spec.reward_failure
+                reward = (
+                    spec.tamper_reward if spec.tamper_reward is not None else spec.reward_failure
+                )
 
         tests_total = counts["tests"] if counts else None
         tests_failed = (counts["failures"] + counts["errors"]) if counts else None

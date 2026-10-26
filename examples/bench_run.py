@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections import defaultdict
-from datetime import datetime, timezone
-from pathlib import Path
 import uuid
+from collections import defaultdict
+from datetime import UTC, datetime
+from pathlib import Path
 
 from agentbox.benchmark.loader import load_suite
 from agentbox.benchmark.report import build_leaderboard, build_model_report
@@ -27,7 +27,7 @@ OUT = ROOT.parent / "bench-results" / "coding-mini-mock"
 
 def _fix_scripts() -> list[ModelResponse]:
     """Scripted tool calls that solve both mini suite tasks when present."""
-    fizz = '''def fizzbuzz(n):
+    fizz = """def fizzbuzz(n):
     if n % 15 == 0:
         return "FizzBuzz"
     if n % 3 == 0:
@@ -35,10 +35,10 @@ def _fix_scripts() -> list[ModelResponse]:
     if n % 5 == 0:
         return "Buzz"
     return str(n)
-'''
-    rev = '''def reverse_string(s):
+"""
+    rev = """def reverse_string(s):
     return s[::-1]
-'''
+"""
     steps: list[ModelResponse] = []
     for path, content in (("fizzbuzz.py", fizz), ("reverse.py", rev)):
         steps.append(
@@ -110,8 +110,8 @@ async def main() -> None:
         suite_version=suite.manifest.version,
         suite_content_hash=suite.manifest.content_hash,
         agentbox_version=__version__,
-        started_at=datetime.now(timezone.utc),
-        finished_at=datetime.now(timezone.utc),
+        started_at=datetime.now(UTC),
+        finished_at=datetime.now(UTC),
         models=[mr],
         leaderboard=build_leaderboard([mr]),
     )

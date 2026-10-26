@@ -7,8 +7,9 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -110,10 +111,10 @@ async def batch_generate(
     lock = asyncio.Lock()
     stop = asyncio.Event()
     accepted: list[Task] = []
-    review_items: list = []
+    review_items: list[Any] = []
 
     # load existing accepted tasks (only fingerprints are kept for dedup)
-    index = DedupIndex(jaccard_threshold=batch.jaccard_threshold)
+    dedup_index = DedupIndex(jaccard_threshold=batch.jaccard_threshold)
     for p in sorted(out.glob("*.json")):
         try:
             existing = Task.model_validate(json.loads(p.read_text()))
@@ -121,7 +122,7 @@ async def batch_generate(
             logger.warning("skipping unreadable task %s", p)
             continue
         accepted.append(existing)
-        index.add(existing)
+        dedup_index.add(existing)
 
     if len(done) >= batch.target:
         log(f"already have {len(done)}/{batch.target}")
@@ -163,15 +164,13 @@ async def batch_generate(
                             state.failures += 1
                             _save_state(state_path, state)
                             review_items.append(
-                                queue_item_from_task(
-                                    task, errors=sq.errors, warnings=sq.warnings
-                                )
+                                queue_item_from_task(task, errors=sq.errors, warnings=sq.warnings)
                             )
                         continue
 
                 if batch.dedup:
                     async with lock:
-                        dup, reason = index.check(task)
+                        dup, reason = dedup_index.check(task)
                     if dup:
                         last_err = f"dedup: {reason}"
                         log(f"  [{index:02d}] {last_err[:120]}")
@@ -184,8 +183,7 @@ async def batch_generate(
                 solution_files = None
                 if task.metadata.get("solution_files"):
                     solution_files = {
-                        str(k): str(v)
-                        for k, v in task.metadata["solution_files"].items()
+                        str(k): str(v) for k, v in task.metadata["solution_files"].items()
                     }
 
                 if batch.enable_docker_qc:
@@ -203,9 +201,7 @@ async def batch_generate(
                             state.attempts += 1
                             state.failures += 1
                             _save_state(state_path, state)
-                            review_items.append(
-                                queue_item_from_task(task, errors=drep.errors)
-                            )
+                            review_items.append(queue_item_from_task(task, errors=drep.errors))
                         continue
 
                 if batch.enable_llm_qc:
@@ -248,7 +244,7 @@ async def batch_generate(
                     task.save_json(path)
                     done.add(tid)
                     accepted.append(task)
-                    index.add(task)
+                    dedup_index.add(task)
                     state.done_ids = sorted(done)
                     state.attempts += 1
                     state.next_i = max(state.next_i, index + 1)
@@ -270,12 +266,12 @@ async def batch_generate(
                 return task
             except Exception as exc:
                 last_err = str(exc)
-                log(f"  [{index:02d}] error attempt {attempt+1}: {last_err[:160]}")
+                log(f"  [{index:02d}] error attempt {attempt + 1}: {last_err[:160]}")
                 async with lock:
                     state.attempts += 1
                     state.failures += 1
                     _save_state(state_path, state)
-                await asyncio.sleep(min(2 ** attempt, 8))
+                await asyncio.sleep(min(2**attempt, 8))
         log(f"  FAIL i={index}: {last_err[:160]}")
         return None
 

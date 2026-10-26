@@ -5,8 +5,6 @@ from __future__ import annotations
 import pytest
 
 from agentbox.runner.parallel import ParallelRunner
-from agentbox.tasks.schema import Task, VerifierSpec
-from agentbox.types import FinalStatus, VerifierType
 
 
 @pytest.mark.asyncio

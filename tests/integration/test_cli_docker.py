@@ -56,13 +56,26 @@ def test_run_mock_resume_and_manifest(tmp_path: Path) -> None:
 
 def test_bench_create_and_mock_run(tmp_path: Path) -> None:
     suite = tmp_path / "suite"
-    r = runner.invoke(app, ["bench", "create", str(suite), "--from-tasks",
-                            str(ROOT / "examples" / "benchmarks" / "coding-mini" / "tasks"),
-                            "--suite-id", "mini", "--name", "mini"])
+    r = runner.invoke(
+        app,
+        [
+            "bench",
+            "create",
+            str(suite),
+            "--from-tasks",
+            str(ROOT / "examples" / "benchmarks" / "coding-mini" / "tasks"),
+            "--suite-id",
+            "mini",
+            "--name",
+            "mini",
+        ],
+    )
     assert r.exit_code == 0, r.stdout
     assert runner.invoke(app, ["bench", "validate", str(suite), "--strict"]).exit_code == 0
     out = tmp_path / "res"
-    r = runner.invoke(app, ["--json", "bench", "run", str(suite), "--mock", "-o", str(out), "--no-progress"])
+    r = runner.invoke(
+        app, ["--json", "bench", "run", str(suite), "--mock", "-o", str(out), "--no-progress"]
+    )
     assert r.exit_code == 0, r.stdout
     assert (out / "report.json").exists() and (out / "models" / "mock" / "trajectories").is_dir()
     r = runner.invoke(app, ["bench", "show", str(out)])
@@ -94,16 +107,22 @@ async def test_http_server_roundtrip() -> None:
     from agentbox.server.app import ServerSettings, create_app
     from agentbox.tasks.loader import load_task
 
-    app_ = create_app(ServerSettings(
-        sandbox=SandboxConfig(limits=ResourceLimits(network_disabled=True)), token="s3cret"
-    ))
+    app_ = create_app(
+        ServerSettings(
+            sandbox=SandboxConfig(limits=ResourceLimits(network_disabled=True)), token="s3cret"
+        )
+    )
     task = load_task(ROOT / "examples" / "tasks" / "fix_fizzbuzz" / "task.json")
     async with app_.router.lifespan_context(app_):
         transport = httpx.ASGITransport(app=app_)
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as raw:
             assert (await raw.post("/v1/sessions", json={})).status_code == 401
-        client = httpx.AsyncClient(transport=transport, base_url="http://t",
-                                   headers={"authorization": "Bearer s3cret"}, timeout=120)
+        client = httpx.AsyncClient(
+            transport=transport,
+            base_url="http://t",
+            headers={"authorization": "Bearer s3cret"},
+            timeout=120,
+        )
         env = RemoteEnv("http://t", client=client)
         obs = await env.reset(task)
         assert obs.tools and obs.messages[1]["role"] == "user"

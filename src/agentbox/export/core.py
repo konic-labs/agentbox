@@ -130,7 +130,9 @@ def _groups(trajs: Iterable[Trajectory]) -> Iterator[list[Trajectory]]:
 
 
 @register_exporter("chat")
-def _chat(trajs: Iterable[Trajectory], fh: IO[str], stats: ExportStats, opts: dict[str, Any]) -> None:
+def _chat(
+    trajs: Iterable[Trajectory], fh: IO[str], stats: ExportStats, opts: dict[str, Any]
+) -> None:
     """``{"messages", "tools", "metadata"}`` rows (TRL SFTTrainer conversational format)."""
     include_reasoning = bool(opts.get("include_reasoning", False))
     for t in trajs:
@@ -142,7 +144,9 @@ def _chat(trajs: Iterable[Trajectory], fh: IO[str], stats: ExportStats, opts: di
 
 
 @register_exporter("sharegpt")
-def _sharegpt(trajs: Iterable[Trajectory], fh: IO[str], stats: ExportStats, opts: dict[str, Any]) -> None:
+def _sharegpt(
+    trajs: Iterable[Trajectory], fh: IO[str], stats: ExportStats, opts: dict[str, Any]
+) -> None:
     names = {"system": "system", "user": "human", "assistant": "gpt", "tool": "tool"}
     for t in trajs:
         convo = []
@@ -166,7 +170,9 @@ def _prompt_split(t: Trajectory) -> tuple[list[dict[str, Any]], list[dict[str, A
 
 
 @register_exporter("dpo")
-def _dpo(trajs: Iterable[Trajectory], fh: IO[str], stats: ExportStats, opts: dict[str, Any]) -> None:
+def _dpo(
+    trajs: Iterable[Trajectory], fh: IO[str], stats: ExportStats, opts: dict[str, Any]
+) -> None:
     """Best vs worst trajectory per group: ``{"prompt", "chosen", "rejected"}`` (TRL DPO)."""
     min_margin = float(opts.get("min_margin", 0.5))
     for group in _groups(trajs):
@@ -195,7 +201,9 @@ def _dpo(trajs: Iterable[Trajectory], fh: IO[str], stats: ExportStats, opts: dic
 
 
 @register_exporter("grpo")
-def _grpo(trajs: Iterable[Trajectory], fh: IO[str], stats: ExportStats, opts: dict[str, Any]) -> None:
+def _grpo(
+    trajs: Iterable[Trajectory], fh: IO[str], stats: ExportStats, opts: dict[str, Any]
+) -> None:
     """One row per group with rewards and group-relative advantages."""
     method = opts.get("advantage", "grpo")
     drop_zero = bool(opts.get("drop_zero_variance", False))
@@ -221,32 +229,60 @@ def _grpo(trajs: Iterable[Trajectory], fh: IO[str], stats: ExportStats, opts: di
 
 
 @register_exporter("tokens")
-def _tokens(trajs: Iterable[Trajectory], fh: IO[str], stats: ExportStats, opts: dict[str, Any]) -> None:
+def _tokens(
+    trajs: Iterable[Trajectory], fh: IO[str], stats: ExportStats, opts: dict[str, Any]
+) -> None:
     """Exact token data: one row per sequence (``per_turn=True``: one row per turn)."""
     per_turn = bool(opts.get("per_turn", False))
     missing = 0
     for t in trajs:
-        base = {"task_id": t.task_id, "rollout_id": t.rollout_id, "group_id": t.group_id,
-                "reward": t.reward}
+        base = {
+            "task_id": t.task_id,
+            "rollout_id": t.rollout_id,
+            "group_id": t.group_id,
+            "reward": t.reward,
+        }
         if per_turn:
-            turns = [getattr(m, "tokens", None) for m in t.messages
-                     if (m.role.value if isinstance(m.role, MessageRole) else m.role) == "assistant"]
+            turns = [
+                getattr(m, "tokens", None)
+                for m in t.messages
+                if (m.role.value if isinstance(m.role, MessageRole) else m.role) == "assistant"
+            ]
             samples = list(iter_turn_samples(turns))
             if not samples:
                 missing += 1
             for i, (prompt, completion, logprobs) in enumerate(samples):
-                _write(fh, {**base, "turn": i, "prompt_ids": prompt, "completion_ids": completion,
-                            "logprobs": logprobs}, stats)
+                _write(
+                    fh,
+                    {
+                        **base,
+                        "turn": i,
+                        "prompt_ids": prompt,
+                        "completion_ids": completion,
+                        "logprobs": logprobs,
+                    },
+                    stats,
+                )
             continue
         trace = trace_from_messages(t.messages)
         if trace is None:
             missing += 1
             continue
         for i, seq in enumerate(trace.sequences):
-            _write(fh, {**base, "sequence": i, "prompt_ids": seq.prompt_ids,
-                        "response_ids": seq.response_ids, "response_mask": seq.response_mask,
-                        "response_logprobs": seq.response_logprobs, "num_turns": seq.num_turns,
-                        "exact": trace.exact}, stats)
+            _write(
+                fh,
+                {
+                    **base,
+                    "sequence": i,
+                    "prompt_ids": seq.prompt_ids,
+                    "response_ids": seq.response_ids,
+                    "response_mask": seq.response_mask,
+                    "response_logprobs": seq.response_logprobs,
+                    "num_turns": seq.num_turns,
+                    "exact": trace.exact,
+                },
+                stats,
+            )
     if missing:
         stats.notes.append(
             f"{missing} trajectories had no token data (enable ModelConfig.capture_tokens)"
@@ -254,7 +290,9 @@ def _tokens(trajs: Iterable[Trajectory], fh: IO[str], stats: ExportStats, opts: 
 
 
 @register_exporter("art")
-def _art(trajs: Iterable[Trajectory], fh: IO[str], stats: ExportStats, opts: dict[str, Any]) -> None:
+def _art(
+    trajs: Iterable[Trajectory], fh: IO[str], stats: ExportStats, opts: dict[str, Any]
+) -> None:
     from agentbox.integrations.art import to_art_dict
 
     for t in trajs:
@@ -262,7 +300,9 @@ def _art(trajs: Iterable[Trajectory], fh: IO[str], stats: ExportStats, opts: dic
 
 
 @register_exporter("hf")
-def _hf(trajs: Iterable[Trajectory], fh: IO[str] | None, stats: ExportStats, opts: dict[str, Any]) -> None:
+def _hf(
+    trajs: Iterable[Trajectory], fh: IO[str] | None, stats: ExportStats, opts: dict[str, Any]
+) -> None:
     """Parquet via HF ``datasets`` (``push_to_hub=<repo>`` uploads it)."""
     try:
         from datasets import Dataset

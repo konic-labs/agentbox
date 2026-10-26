@@ -17,7 +17,11 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from agentbox.agent.protocols import hermes_tool_response, parse_hermes_tool_calls, render_hermes_tools
+from agentbox.agent.protocols import (
+    hermes_tool_response,
+    parse_hermes_tool_calls,
+    render_hermes_tools,
+)
 from agentbox.config import AgentConfig
 from agentbox.errors import ContextLengthError, ModelError
 from agentbox.model.base import ModelClient, ModelResponse

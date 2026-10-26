@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 
@@ -54,7 +54,7 @@ def train_trl(
     out: Annotated[Path, typer.Option("--out", "-o")] = Path("grpo-agentbox"),
     steps: Annotated[int, typer.Option("--steps")] = 100,
     group_size: Annotated[int, typer.Option("--group-size", help="num_generations")] = 8,
-    batch_size: Annotated[Optional[int], typer.Option("--batch-size")] = None,
+    batch_size: Annotated[int | None, typer.Option("--batch-size")] = None,
     lr: Annotated[float, typer.Option("--lr")] = 1e-6,
     max_completion_length: Annotated[int, typer.Option("--max-completion-length")] = 1024,
     max_tool_calls: Annotated[int, typer.Option("--max-tool-calls")] = 8,
@@ -111,7 +111,7 @@ def train_trl(
             bf16=True,
             report_to="none",
         ),
-        **kwargs,  # type: ignore[arg-type]
+        **kwargs,
     )
     trainer.train()
     trainer.save_model(str(out))

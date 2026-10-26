@@ -17,7 +17,7 @@ async def main() -> None:
     task_path = Path(__file__).parent / "tasks" / "fix_fizzbuzz" / "task.json"
     task = Task.from_json(task_path)
 
-    fixed = '''def fizzbuzz(n):
+    fixed = """def fizzbuzz(n):
     if n % 15 == 0:
         return "FizzBuzz"
     if n % 3 == 0:
@@ -25,7 +25,7 @@ async def main() -> None:
     if n % 5 == 0:
         return "Buzz"
     return str(n)
-'''
+"""
     mock = MockModelClient(
         [
             ModelResponse(
@@ -35,9 +35,7 @@ async def main() -> None:
                         id="call_1",
                         function=FunctionCall(
                             name="write_file",
-                            arguments=json.dumps(
-                                {"path": "fizzbuzz.py", "content": fixed}
-                            ),
+                            arguments=json.dumps({"path": "fizzbuzz.py", "content": fixed}),
                         ),
                     )
                 ],
