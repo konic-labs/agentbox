@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from agentbox.trajectory.tokens import TurnTokens
 from agentbox.types import FinalStatus, MessageRole
 
 
@@ -35,6 +36,7 @@ class Message(BaseModel):
     finish_reason: str | None = None
     usage: dict[str, int] | None = None
     latency_s: float | None = None
+    tokens: TurnTokens | None = None
 
     def to_openai_dict(self, *, include_reasoning: bool = False) -> dict[str, Any]:
         """Convert to an OpenAI Chat Completions message dict.

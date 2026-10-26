@@ -107,10 +107,39 @@ class ModelConfig(BaseModel):
     model: str
     base_url: str | None = None
     api_key: str | None = None
-    temperature: float = 0.7
+    api_key_env: str | None = Field(
+        default=None, description="Read the API key from this environment variable."
+    )
+    temperature: float | None = 0.7
     max_tokens: int | None = 4096
+    max_tokens_param: Literal["max_tokens", "max_completion_tokens"] = "max_tokens"
     top_p: float | None = None
+    seed: int | None = None
+    stop: list[str] | None = None
+    presence_penalty: float | None = None
+    frequency_penalty: float | None = None
+    top_k: int | None = Field(default=None, description="vLLM/SGLang sampling (extra_body)")
+    min_p: float | None = Field(default=None, description="vLLM/SGLang sampling (extra_body)")
+    repetition_penalty: float | None = Field(default=None, description="vLLM (extra_body)")
     timeout_s: float = 120.0
+    max_retries: int = Field(default=4, description="Retries for 429/5xx/timeouts/connection.")
+    retry_backoff_s: float = 1.0
+    retry_max_backoff_s: float = 30.0
+    adaptive_max_tokens: bool = Field(
+        default=True,
+        description="When prompt+max_tokens exceeds the context, retry with the room left.",
+    )
+    min_completion_tokens: int = 128
+    capture_tokens: bool = Field(
+        default=False,
+        description="Request token ids (vLLM return_token_ids) for exact RL training data.",
+    )
+    capture_logprobs: bool = Field(default=False, description="Request sampler logprobs.")
+    top_logprobs: int | None = None
+    record_raw: bool = Field(default=False, description="Keep the raw choice dict per turn.")
+    strip_think: bool = Field(
+        default=False, description="Move <think>...</think> from content into reasoning."
+    )
     tool_choice: str | dict[str, Any] | None = "auto"
     parallel_tool_calls: bool | None = Field(
         default=None,

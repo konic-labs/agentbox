@@ -16,6 +16,10 @@ class ModelResponse(BaseModel):
     reasoning_content: str | None = None
     usage: dict[str, int] | None = None
     raw_choice: dict[str, Any] | None = None
+    # Token-level data (only when the server returns it, see ModelConfig.capture_*)
+    prompt_token_ids: list[int] | None = None
+    completion_token_ids: list[int] | None = None
+    completion_logprobs: list[float] | None = None
 
 
 @runtime_checkable
@@ -30,3 +34,10 @@ class ModelClient(Protocol):
         tool_choice: str | dict[str, Any] | None = "auto",
         **kwargs: Any,
     ) -> ModelResponse: ...
+
+
+async def aclose_model(client: Any) -> None:
+    """Close a model client if it supports ``aclose`` (no-op otherwise)."""
+    close = getattr(client, "aclose", None)
+    if close is not None:
+        await close()

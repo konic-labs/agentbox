@@ -24,6 +24,7 @@ from agentbox.model.base import ModelClient, ModelResponse
 from agentbox.tools.base import ToolContext
 from agentbox.tools.executor import ToolExecutor, ToolOutcome
 from agentbox.trajectory.schema import Message, ToolCallRecord
+from agentbox.trajectory.tokens import TokenTracker
 from agentbox.types import FailureKind, FinalStatus, MessageRole, StopReason
 
 
@@ -170,6 +171,7 @@ class AgentLoop:
         model_calls = 0
         step = 0
         ctx.deadline = episode_deadline
+        tokens = TokenTracker()
 
         def finish(
             status: FinalStatus,
@@ -236,6 +238,11 @@ class AgentLoop:
                 model_calls += 1
                 self._accumulate_usage(usage_totals, response)
                 assistant = self._to_assistant_message(response, time.monotonic() - t0)
+                assistant.tokens = tokens.observe(
+                    response.prompt_token_ids,
+                    response.completion_token_ids,
+                    response.completion_logprobs,
+                )
                 if hermes and not assistant.tool_calls:
                     _, parsed = parse_hermes_tool_calls(assistant.content)
                     assistant.tool_calls = parsed or None
