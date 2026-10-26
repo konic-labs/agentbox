@@ -7,7 +7,7 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 
 from agentbox.tools.base import BaseTool
-from agentbox.tools.builtins import default_tools, shell_tools
+from agentbox.tools.builtins import all_builtins, default_tools, extended_tools, shell_tools
 from agentbox.types import ToolMode
 
 
@@ -16,14 +16,17 @@ class ToolRegistry:
 
     def __init__(self) -> None:
         self._tools: dict[str, BaseTool] = {}
+        self._schemas: list[dict[str, Any]] | None = None
 
     def register(self, tool: BaseTool, *, override: bool = True) -> None:
         if not override and tool.name in self._tools:
             raise ValueError(f"Tool already registered: {tool.name}")
         self._tools[tool.name] = tool
+        self._schemas = None
 
     def unregister(self, name: str) -> None:
         self._tools.pop(name, None)
+        self._schemas = None
 
     def get(self, name: str) -> BaseTool | None:
         return self._tools.get(name)
@@ -34,18 +37,42 @@ class ToolRegistry:
     def names(self) -> list[str]:
         return list(self._tools.keys())
 
+    def __contains__(self, name: object) -> bool:
+        return name in self._tools
+
+    def __len__(self) -> int:
+        return len(self._tools)
+
     def openai_tools(self) -> list[dict[str, Any]]:
-        return [t.openai_schema() for t in self._tools.values()]
+        """Schemas, built once and cached until the registry changes."""
+        if self._schemas is None:
+            self._schemas = [t.openai_schema() for t in self._tools.values()]
+        return self._schemas
 
     def drop(self, names: Iterable[str]) -> None:
         for name in names:
             self._tools.pop(name, None)
+        self._schemas = None
 
 
 def _as_tool(obj: Any) -> BaseTool:
     if isinstance(obj, BaseTool):
         return obj
     raise TypeError(f"Expected BaseTool, got {type(obj)!r}")
+
+
+def _mode_value(mode: ToolMode | list[str] | str) -> ToolMode | list[str] | str:
+    if isinstance(mode, ToolMode):
+        return mode
+    if isinstance(mode, str):
+        try:
+            return ToolMode(mode)
+        except ValueError as exc:
+            raise ValueError(
+                f"Unknown tool mode {mode!r}; use one of {[m.value for m in ToolMode]} "
+                "or a list of builtin tool names"
+            ) from exc
+    return mode
 
 
 def build_tool_registry(
@@ -60,30 +87,27 @@ def build_tool_registry(
     """Compose a tool set from mode, custom tools, and drop rules."""
     registry = ToolRegistry()
     rng = rng or random.Random()
-
-    if isinstance(mode, str) and mode not in {m.value for m in ToolMode}:
-        # treat as invalid — fall through
-        pass
+    mode = _mode_value(mode)
 
     if include_builtins:
-        if mode == ToolMode.STRUCTURED or mode == "structured":
+        if mode == ToolMode.STRUCTURED:
             for t in default_tools():
                 registry.register(t)
-        elif mode == ToolMode.SHELL or mode == "shell":
+        elif mode == ToolMode.EXTENDED:
+            for t in extended_tools():
+                registry.register(t)
+        elif mode == ToolMode.SHELL:
             for t in shell_tools():
                 registry.register(t)
-        elif mode == ToolMode.CUSTOM or mode == "custom":
+        elif mode == ToolMode.CUSTOM:
             pass
         elif isinstance(mode, list):
-            all_builtins = {t.name: t for t in default_tools()}
+            builtins = all_builtins()
             for name in mode:
-                if name in all_builtins:
-                    registry.register(all_builtins[name])
-                else:
+                if name in builtins:
+                    registry.register(builtins[name])
+                elif not any(getattr(c, "name", None) == name for c in custom_tools or ()):
                     raise ValueError(f"Unknown builtin tool: {name}")
-        else:
-            for t in default_tools():
-                registry.register(t)
 
     if custom_tools:
         for obj in custom_tools:
@@ -92,8 +116,11 @@ def build_tool_registry(
     if drop:
         registry.drop(drop)
 
-    if drop_prob > 0:
-        to_drop = [n for n in registry.names() if rng.random() < drop_prob]
+    if drop_prob > 0 and len(registry) > 1:
+        names = registry.names()
+        to_drop = [n for n in names if rng.random() < drop_prob]
+        if len(to_drop) >= len(names):  # always leave the agent at least one tool
+            to_drop.remove(rng.choice(to_drop))
         registry.drop(to_drop)
 
     return registry

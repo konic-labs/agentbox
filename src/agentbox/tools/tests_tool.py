@@ -7,10 +7,17 @@ from typing import Any
 from agentbox.tools.base import BaseTool, ToolResult
 from agentbox.tools.shell import RunCommandTool
 
+DEFAULT_TEST_COMMAND = "python -m pytest -q"
+
 
 class RunTestsTool(BaseTool):
     name = "run_tests"
-    description = "Run the test suite inside the container (default: pytest)."
+    description = "Run the test suite inside the container (default: python -m pytest -q)."
+
+    def __init__(self, default_command: str = DEFAULT_TEST_COMMAND, timeout_s: float = 120.0):
+        self.default_command = default_command
+        self.timeout_s = timeout_s
+        self._runner = RunCommandTool()
 
     def parameters(self) -> dict[str, Any]:
         return {
@@ -19,7 +26,7 @@ class RunTestsTool(BaseTool):
                 "command": {
                     "type": "string",
                     "description": "Test command to run",
-                    "default": "python -m pytest -q",
+                    "default": self.default_command,
                 },
             },
             "additionalProperties": False,
@@ -28,8 +35,9 @@ class RunTestsTool(BaseTool):
     async def execute(
         self,
         sandbox: Any,
-        command: str = "python -m pytest -q",
+        command: str | None = None,
         **_: Any,
     ) -> str | ToolResult:
-        runner = RunCommandTool()
-        return await runner.execute(sandbox, command=command, timeout_s=120.0)
+        return await self._runner.execute(
+            sandbox, command=command or self.default_command, timeout_s=self.timeout_s
+        )

@@ -1,47 +1,78 @@
-"""@tool decorator for defining tools from async functions."""
+"""@tool decorator for defining tools from (async or sync) functions."""
 
 from __future__ import annotations
 
+import asyncio
 import inspect
+import re
 from collections.abc import Callable
-from typing import Any, get_args, get_origin, get_type_hints
+from typing import Any, get_type_hints
 
-from agentbox.tools.base import BaseTool, ToolResult
+from pydantic import TypeAdapter
+
+from agentbox.tools.base import BaseTool, ToolContext, ToolResult, get_tool_context
+
+_RESERVED = {"sandbox", "ctx"}
 
 
-_TYPE_MAP: dict[type, str] = {
-    str: "string",
-    int: "integer",
-    float: "number",
-    bool: "boolean",
-}
+def _docstring_args(doc: str | None) -> tuple[str, dict[str, str]]:
+    """Split a Google-style docstring into (summary, {arg: description})."""
+    if not doc:
+        return "", {}
+    text = inspect.cleandoc(doc)
+    parts = re.split(r"^\s*(Args|Arguments|Parameters):\s*$", text, maxsplit=1, flags=re.M)
+    summary = parts[0].strip()
+    args: dict[str, str] = {}
+    if len(parts) == 3:
+        current: str | None = None
+        for line in parts[2].splitlines():
+            if re.match(r"^\s*(Returns|Raises|Yields|Examples?):\s*$", line):
+                break
+            m = re.match(r"^\s*(\w+)\s*(?:\([^)]*\))?\s*:\s*(.*)$", line)
+            if m:
+                current = m.group(1)
+                args[current] = m.group(2).strip()
+            elif current and line.strip():
+                args[current] += " " + line.strip()
+    return summary, args
+
+
+def _json_schema_for(annotation: Any) -> dict[str, Any]:
+    try:
+        schema = TypeAdapter(annotation).json_schema()
+    except Exception:
+        return {"type": "string"}
+    schema.pop("title", None)
+    return schema
 
 
 def _schema_from_signature(fn: Callable[..., Any]) -> dict[str, Any]:
-    hints = get_type_hints(fn)
+    try:
+        hints = get_type_hints(fn)
+    except Exception:
+        hints = {}
     sig = inspect.signature(fn)
+    _, arg_docs = _docstring_args(fn.__doc__)
     properties: dict[str, Any] = {}
     required: list[str] = []
+    defs: dict[str, Any] = {}
 
     for name, param in sig.parameters.items():
-        if name == "sandbox":
+        if name in _RESERVED or param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
             continue
-        if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
-            continue
-        ann = hints.get(name, str)
-        origin = get_origin(ann)
-        if origin is type(None):
-            json_type = "string"
-        elif origin is not None:
-            # Optional[X] / X | None
-            args = [a for a in get_args(ann) if a is not type(None)]
-            json_type = _TYPE_MAP.get(args[0], "string") if args else "string"
-        else:
-            json_type = _TYPE_MAP.get(ann, "string")
-
-        properties[name] = {"type": json_type}
+        prop = _json_schema_for(hints.get(name, str))
+        defs.update(prop.pop("$defs", {}))
+        if name in arg_docs and arg_docs[name]:
+            prop["description"] = arg_docs[name]
         if param.default is inspect.Parameter.empty:
             required.append(name)
+        else:
+            try:
+                TypeAdapter(type(param.default)).dump_json(param.default)
+                prop.setdefault("default", param.default)
+            except Exception:
+                pass
+        properties[name] = prop
 
     schema: dict[str, Any] = {
         "type": "object",
@@ -50,6 +81,8 @@ def _schema_from_signature(fn: Callable[..., Any]) -> dict[str, Any]:
     }
     if required:
         schema["required"] = required
+    if defs:
+        schema["$defs"] = defs
     return schema
 
 
@@ -58,31 +91,50 @@ def tool(
     description: str | None = None,
     *,
     parameters: dict[str, Any] | None = None,
+    read_only: bool = False,
+    terminal: bool = False,
 ) -> Callable[[Callable[..., Any]], BaseTool]:
-    """Wrap an async function as a BaseTool.
+    """Wrap a function as a :class:`BaseTool`.
 
-    Signature must be::
+    The function receives the sandbox as its first argument and may declare a
+    ``ctx: ToolContext`` parameter::
 
-        async def fn(sandbox, <param>: <type>, ...) -> str
+        @tool(description="Count lines")
+        async def count_lines(sandbox, path: str) -> str: ...
+
+    Sync functions run in a worker thread. Parameter descriptions are taken from
+    a Google-style ``Args:`` docstring section.
     """
 
     def decorator(fn: Callable[..., Any]) -> BaseTool:
         tool_name = name or fn.__name__
-        tool_desc = description or (fn.__doc__ or tool_name).strip()
+        summary, _ = _docstring_args(fn.__doc__)
+        tool_desc = description or summary or tool_name
         schema = parameters or _schema_from_signature(fn)
+        wants_ctx = "ctx" in inspect.signature(fn).parameters
+        is_async = inspect.iscoroutinefunction(fn)
 
         class FunctionTool(BaseTool):
             def parameters(self) -> dict[str, Any]:
                 return schema
 
             async def execute(self, sandbox: Any, **kwargs: Any) -> str | ToolResult:
-                return await fn(sandbox, **kwargs)
+                if wants_ctx:
+                    kwargs["ctx"] = get_tool_context() or ToolContext(sandbox=sandbox)
+                if is_async:
+                    result = await fn(sandbox, **kwargs)
+                else:
+                    result = await asyncio.to_thread(fn, sandbox, **kwargs)
+                if isinstance(result, ToolResult) or isinstance(result, str):
+                    return result
+                return str(result)
 
         FunctionTool.name = tool_name
         FunctionTool.description = tool_desc
+        FunctionTool.read_only = read_only
+        FunctionTool.terminal = terminal
         FunctionTool.__name__ = f"Tool_{tool_name}"
         instance = FunctionTool()
-        # preserve original for debugging
         instance._fn = fn  # type: ignore[attr-defined]
         return instance
 

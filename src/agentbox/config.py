@@ -112,9 +112,16 @@ class ModelConfig(BaseModel):
     top_p: float | None = None
     timeout_s: float = 120.0
     tool_choice: str | dict[str, Any] | None = "auto"
+    parallel_tool_calls: bool | None = Field(
+        default=None,
+        description="Forwarded as the OpenAI parallel_tool_calls request field when set.",
+    )
     extra_headers: dict[str, str] = Field(default_factory=dict)
     extra_body: dict[str, Any] = Field(default_factory=dict)
-    require_tool_calling: bool = True
+    require_tool_calling: bool = Field(
+        default=True,
+        description="Fail fast when the server rejects tool definitions (native protocol).",
+    )
 
 
 class AgentConfig(BaseModel):
@@ -127,10 +134,36 @@ class AgentConfig(BaseModel):
     max_steps: int = 40
     step_timeout_s: float = 120.0
     episode_timeout_s: float = 900.0
-    parallel_tool_calls: bool = True
+    parallel_tool_calls: bool = Field(
+        default=True,
+        description=(
+            "Run consecutive read-only tool calls of one turn concurrently. Calls that "
+            "write or execute always run sequentially in emission order."
+        ),
+    )
+    tool_timeout_s: float = Field(default=120.0, description="Upper bound for any tool call.")
+    max_tool_output_chars: int = Field(
+        default=16_000, description="Tool results shown to the model are truncated head+tail."
+    )
+    tool_protocol: Literal["native", "hermes"] = Field(
+        default="native",
+        description=(
+            "native: OpenAI tool_calls. hermes: tools rendered into the system prompt and "
+            "<tool_call> blocks parsed from content (servers without tool parsing)."
+        ),
+    )
+    tool_response_role: Literal["tool", "user"] = Field(
+        default="tool",
+        description="hermes protocol only: send tool results as role=tool or wrapped user turns.",
+    )
     drop_tools: list[str] = Field(default_factory=list)
     drop_tools_prob: float = 0.0
-    include_thinking: bool = True
+    include_thinking: bool = Field(
+        default=True, description="Record model reasoning in the trajectory."
+    )
+    send_reasoning: bool = Field(
+        default=False, description="Echo recorded reasoning back to the server on later turns."
+    )
     # Optional process reward shaping applied after verifier
     step_penalty: float = 0.0
     timeout_penalty: float = 0.0
