@@ -23,7 +23,7 @@ class LocalArtifactStore:
     def _path(self, key: str) -> Path:
         # prevent path escape
         p = (self.root / key).resolve()
-        if not str(p).startswith(str(self.root.resolve())):
+        if not p.is_relative_to(self.root.resolve()):  # not a string-prefix check (GH #86)
             raise ValueError(f"invalid artifact key: {key}")
         return p
 

@@ -13,12 +13,13 @@ from typing import Any, Callable
 from pydantic import BaseModel, Field
 
 from agentbox.tasks.generate.constraints import constraint_for_index, load_constraint_families
-from agentbox.tasks.generate.dedup import is_near_duplicate, task_signature_hash
+from agentbox.tasks.generate.dedup import DedupIndex, task_signature_hash
 from agentbox.tasks.generate.generator import GenerateConfig, TaskGenerator
 from agentbox.tasks.generate.review import export_review_queue, queue_item_from_task
 from agentbox.tasks.generate.static_qc import validate_task_static
 from agentbox.tasks.generate.validate import validate_task_live
 from agentbox.tasks.schema import Task
+from agentbox.utils.io import atomic_write_text
 
 logger = logging.getLogger("agentbox.generate.batch")
 
@@ -59,8 +60,7 @@ def _load_state(path: Path) -> BatchState:
 
 
 def _save_state(path: Path, state: BatchState) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(state.model_dump_json(indent=2), encoding="utf-8")
+    atomic_write_text(path, state.model_dump_json(indent=2))  # crash-safe resume state
 
 
 def _scan_done(out_dir: Path) -> set[str]:
@@ -112,12 +112,16 @@ async def batch_generate(
     accepted: list[Task] = []
     review_items: list = []
 
-    # load existing accepted tasks
+    # load existing accepted tasks (only fingerprints are kept for dedup)
+    index = DedupIndex(jaccard_threshold=batch.jaccard_threshold)
     for p in sorted(out.glob("*.json")):
         try:
-            accepted.append(Task.model_validate(json.loads(p.read_text())))
+            existing = Task.model_validate(json.loads(p.read_text()))
         except Exception:
-            pass
+            logger.warning("skipping unreadable task %s", p)
+            continue
+        accepted.append(existing)
+        index.add(existing)
 
     if len(done) >= batch.target:
         log(f"already have {len(done)}/{batch.target}")
@@ -167,11 +171,7 @@ async def batch_generate(
 
                 if batch.dedup:
                     async with lock:
-                        dup, reason = is_near_duplicate(
-                            task,
-                            accepted,
-                            jaccard_threshold=batch.jaccard_threshold,
-                        )
+                        dup, reason = index.check(task)
                     if dup:
                         last_err = f"dedup: {reason}"
                         log(f"  [{index:02d}] {last_err[:120]}")
@@ -248,6 +248,7 @@ async def batch_generate(
                     task.save_json(path)
                     done.add(tid)
                     accepted.append(task)
+                    index.add(task)
                     state.done_ids = sorted(done)
                     state.attempts += 1
                     state.next_i = max(state.next_i, index + 1)
@@ -304,5 +305,6 @@ async def batch_generate(
     except Exception as exc:
         log(f"review_queue write failed: {exc}")
 
+    await gen.aclose()
     log(f"Done: {len(done)}/{batch.target} in {out}")
     return accepted[: batch.target]

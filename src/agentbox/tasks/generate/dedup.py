@@ -107,3 +107,47 @@ def load_existing_signatures(tasks: Iterable[Task]) -> dict[str, str]:
     for t in tasks:
         out[task_signature_hash(t)] = t.task_id
     return out
+
+
+class DedupIndex:
+    """Incremental near-duplicate index (GH #85).
+
+    Signatures and shingle sets are computed once per accepted task instead of
+    for every (candidate, accepted) pair, and an inverted shingle index limits
+    Jaccard comparisons to tasks sharing at least one shingle.
+    """
+
+    def __init__(self, *, jaccard_threshold: float = 0.85, exact_signature: bool = True) -> None:
+        self.jaccard_threshold = jaccard_threshold
+        self.exact_signature = exact_signature
+        self._signatures: dict[str, str] = {}
+        self._shingles: dict[str, frozenset[str]] = {}
+        self._postings: dict[str, set[str]] = {}
+
+    def __len__(self) -> int:
+        return len(self._shingles)
+
+    def add(self, task: Task) -> None:
+        tokens = frozenset(minhash_tokens(task))
+        self._signatures[task_signature_hash(task)] = task.task_id
+        self._shingles[task.task_id] = tokens
+        for tok in tokens:
+            self._postings.setdefault(tok, set()).add(task.task_id)
+
+    def check(self, task: Task) -> tuple[bool, str | None]:
+        if self.exact_signature:
+            other = self._signatures.get(task_signature_hash(task))
+            if other is not None:
+                return True, f"exact signature match with {other}"
+        tokens = minhash_tokens(task)
+        counts: dict[str, int] = {}
+        for tok in tokens:
+            for tid in self._postings.get(tok, ()):
+                counts[tid] = counts.get(tid, 0) + 1
+        for tid, inter in sorted(counts.items(), key=lambda kv: -kv[1]):
+            other_tokens = self._shingles[tid]
+            union = len(tokens) + len(other_tokens) - inter
+            score = inter / union if union else 1.0
+            if score >= self.jaccard_threshold:
+                return True, f"jaccard={score:.2f} with {tid}"
+        return False, None
