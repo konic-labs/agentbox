@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agentbox.tasks.schema import VerifierSpec
 from agentbox.types import VerifierType
@@ -23,6 +23,11 @@ class VerifyResult(BaseModel):
     stderr: str
     duration_s: float
     command: str
+    timed_out: bool = False
+    tests_passed: int | None = None
+    tests_failed: int | None = None
+    tests_total: int | None = None
+    tampered: list[str] = Field(default_factory=list)
 
 
 class Verifier:
@@ -62,4 +67,5 @@ class Verifier:
             stderr=result.stderr,
             duration_s=duration,
             command=command,
+            timed_out=result.timed_out,
         )
