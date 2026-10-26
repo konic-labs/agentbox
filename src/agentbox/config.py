@@ -9,6 +9,19 @@ from pydantic import BaseModel, Field
 
 from agentbox.types import ToolMode
 
+# Capabilities kept after ``cap_drop=["ALL"]``: enough for package managers
+# (apt drops to _apt, pip writes as root) and ordinary process control.
+DEFAULT_CAP_ADD: tuple[str, ...] = (
+    "CHOWN",
+    "DAC_OVERRIDE",
+    "FOWNER",
+    "FSETID",
+    "KILL",
+    "SETGID",
+    "SETUID",
+    "NET_BIND_SERVICE",
+)
+
 
 class ResourceLimits(BaseModel):
     """Docker resource constraints for a sandbox."""
@@ -18,6 +31,24 @@ class ResourceLimits(BaseModel):
     pids_limit: int | None = 256
     network_disabled: bool = True
     memswap_mb: int | None = None
+    shm_size_mb: int | None = None
+    nofile: int | None = None
+    read_only_rootfs: bool = False
+    tmpfs: dict[str, str] = Field(
+        default_factory=dict,
+        description="Mount path -> tmpfs options, e.g. {'/tmp': 'size=256m'}",
+    )
+
+
+class SecurityConfig(BaseModel):
+    """Container hardening applied to every sandbox."""
+
+    cap_drop: list[str] = Field(default_factory=lambda: ["ALL"])
+    cap_add: list[str] = Field(default_factory=lambda: list(DEFAULT_CAP_ADD))
+    no_new_privileges: bool = True
+    init: bool = True
+    user: str | None = None
+    runtime: str | None = Field(default=None, description="OCI runtime, e.g. 'runsc' (gVisor)")
 
 
 class SandboxConfig(BaseModel):
@@ -28,12 +59,46 @@ class SandboxConfig(BaseModel):
     working_dir: str = "/workspace"
     env: dict[str, str] = Field(default_factory=dict)
     limits: ResourceLimits = Field(default_factory=ResourceLimits)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
     auto_pull: bool = True
-    auto_remove: bool = True
-    keep_on_failure: bool = False
+    auto_remove: bool = Field(
+        default=True,
+        description="Remove sandboxes after each rollout (False keeps every sandbox).",
+    )
+    keep_on_failure: bool = Field(
+        default=False,
+        description="Keep the sandbox when a rollout does not succeed (for debugging).",
+    )
     labels: dict[str, str] = Field(default_factory=dict)
     command: list[str] = Field(default_factory=lambda: ["sleep", "infinity"])
-    ensure_pytest: bool = True
+    ensure_pytest: bool = Field(
+        default=True,
+        description=(
+            "Guarantee pytest is importable. Missing pytest is installed once per image "
+            "into a cached derived image (not per container)."
+        ),
+    )
+    shell: list[str] | None = Field(
+        default=None,
+        description="argv prefix for string commands; default: bash -c if present, else sh -c",
+    )
+    max_output_bytes: int = Field(
+        default=256 * 1024,
+        description="Bytes of stdout/stderr kept per stream (head + tail) for each command.",
+    )
+    kill_output_bytes: int | None = Field(
+        default=64 * 1024 * 1024,
+        description="Kill a command once it has produced this many bytes of output.",
+    )
+    prepare_network: bool = Field(
+        default=True,
+        description="Allow network while building cached images (pytest / setup snapshots).",
+    )
+    cache_setup: bool = Field(
+        default=True,
+        description="Snapshot task setup_commands into cached images reused by later rollouts.",
+    )
+    cache_max_images: int = Field(default=64, description="LRU bound on cached setup images.")
 
 
 class ModelConfig(BaseModel):
