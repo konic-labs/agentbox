@@ -64,9 +64,12 @@ def classify_tool_error(msg: str) -> str | None:
     return None
 
 
-async def probe_chat(config: ModelConfig) -> ProbeResult:
+async def probe_chat(
+    config: ModelConfig, *, client: OpenAICompatClient | None = None
+) -> ProbeResult:
     """Send a minimal chat completion (no tools)."""
-    client = OpenAICompatClient(config)
+    owned = client is None
+    client = client or OpenAICompatClient(config)
     try:
         resp = await client.complete(
             [{"role": "user", "content": "Reply with exactly: pong"}],
@@ -100,11 +103,17 @@ async def probe_chat(config: ModelConfig) -> ProbeResult:
             message=str(exc),
             hint="Check base_url, model id, and that the server is up.",
         )
+    finally:
+        if owned:
+            await client.aclose()
 
 
-async def probe_tool_calling(config: ModelConfig) -> ProbeResult:
+async def probe_tool_calling(
+    config: ModelConfig, *, client: OpenAICompatClient | None = None
+) -> ProbeResult:
     """Send a minimal tools request with tool_choice=auto."""
-    client = OpenAICompatClient(config)
+    owned = client is None
+    client = client or OpenAICompatClient(config)
     try:
         resp = await client.complete(
             [{"role": "user", "content": "Use the add tool to compute 2+2."}],
@@ -150,6 +159,9 @@ async def probe_tool_calling(config: ModelConfig) -> ProbeResult:
             message=msg,
             hint=_tools_fail_hint(msg),
         )
+    finally:
+        if owned:
+            await client.aclose()
 
 
 def _tools_fail_hint(msg: str) -> str:
@@ -167,10 +179,11 @@ async def probe_endpoint(
     *,
     require_tools: bool = True,
 ) -> list[ProbeResult]:
-    """Run chat + optional tools probes; return list of results."""
-    results = [await probe_chat(config)]
-    if require_tools:
-        results.append(await probe_tool_calling(config))
+    """Run chat + optional tools probes over one shared client."""
+    async with OpenAICompatClient(config) as client:
+        results = [await probe_chat(config, client=client)]
+        if require_tools:
+            results.append(await probe_tool_calling(config, client=client))
     return results
 
 
