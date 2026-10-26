@@ -84,7 +84,8 @@ def sample_curriculum(
         selected.extend(take)
         remaining -= len(take)
     if remaining > 0:
-        leftover = [t for t in tasks if t not in selected]
+        chosen = {id(t) for t in selected}  # identity, not deep pydantic equality (O(n))
+        leftover = [t for t in tasks if id(t) not in chosen]
         rng.shuffle(leftover)
         selected.extend(leftover[:remaining])
     return selected

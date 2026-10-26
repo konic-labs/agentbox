@@ -1,24 +1,30 @@
 """Token-level trajectory data for RL trainers (token-in / token-out).
 
 Each assistant turn may carry :class:`TurnTokens` captured from the server
-(vLLM ``return_token_ids`` + logprobs). Storage is O(total tokens): the full
-prompt is kept only for the first turn or after a *prefix break* (the server
-re-rendered earlier turns differently, e.g. a chat template that drops past
-``<think>`` blocks or re-serialises tool-call JSON); otherwise only the new
-prompt tokens since the previous completion (tool outputs, chat scaffolding)
-are stored.
+(vLLM ``return_token_ids`` + logprobs). The turn's exact prompt is stored as::
 
-:func:`build_token_trace` turns the turns into training sequences in the
-layout verl / OpenRLHF / SkyRL use::
+    prompt = previous_turn(prompt + completion)[:prompt_reuse] + prompt_ids
 
-    prompt_ids | response_ids = gen_1 env_2 gen_2 env_3 gen_3 ...
+``prompt_reuse`` is the longest common prefix with the previous turn, so
+storage stays ~O(total tokens) even when the server re-renders history (chat
+templates that drop past ``<think>`` blocks or re-serialise tool-call JSON
+cause a *prefix break*: the previous completion is not a prefix of the next
+prompt). Breaks are exact, just not concatenable.
+
+:func:`build_token_trace` assembles turns into training sequences in the
+verl / OpenRLHF / SkyRL layout (one sequence per unbroken run of turns)::
+
+    prompt_ids | response_ids  = gen_1 env_2 gen_2 env_3 gen_3 ...
                | response_mask =  1..1  0..0  1..1  0..0  1..1
+
+:func:`iter_turn_samples` yields every turn as an exact
+``(prompt_ids, completion_ids, logprobs)`` sample regardless of breaks.
 """
 
 from __future__ import annotations
 
 from array import array
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -29,17 +35,28 @@ class TurnTokens(BaseModel):
 
     completion_ids: list[int]
     logprobs: list[float] | None = None
-    prompt_ids: list[int] | None = Field(
-        default=None, description="Full prompt (first turn or after a prefix break)"
+    prompt_reuse: int = Field(
+        default=0, description="Leading prompt tokens shared with the previous turn's sequence"
     )
-    prompt_delta_ids: list[int] | None = Field(
-        default=None, description="Prompt tokens appended since the previous completion"
+    prompt_ids: list[int] | None = Field(
+        default=None, description="Prompt tokens after the reused prefix (None: not captured)"
     )
     prefix_break: bool = False
 
 
+def _common_prefix(a: array[int], b: list[int]) -> int:
+    n = min(len(a), len(b))
+    # fast path: whole prefix equal
+    if n and array("q", b[:n]) == a[:n]:
+        return n
+    lo = 0
+    while lo < n and a[lo] == b[lo]:
+        lo += 1
+    return lo
+
+
 class TokenTracker:
-    """Decides how to store each turn's tokens (full prompt vs. delta)."""
+    """Turns server token data into compact :class:`TurnTokens` (O(n) state)."""
 
     def __init__(self) -> None:
         self._sequence: array[int] | None = None  # prompt + completion of the last turn
@@ -56,27 +73,18 @@ class TokenTracker:
             self._sequence = None
             return TurnTokens(completion_ids=completion_ids, logprobs=logprobs)
         prev = self._sequence
-        if prev is not None and len(prompt_ids) >= len(prev) and _is_prefix(prev, prompt_ids):
-            turn = TurnTokens(
-                completion_ids=completion_ids,
-                logprobs=logprobs,
-                prompt_delta_ids=prompt_ids[len(prev) :],
-            )
-        else:
-            turn = TurnTokens(
-                completion_ids=completion_ids,
-                logprobs=logprobs,
-                prompt_ids=prompt_ids,
-                prefix_break=prev is not None,
-            )
+        reuse = _common_prefix(prev, prompt_ids) if prev is not None else 0
+        turn = TurnTokens(
+            completion_ids=completion_ids,
+            logprobs=logprobs,
+            prompt_reuse=reuse,
+            prompt_ids=prompt_ids[reuse:],
+            prefix_break=prev is not None and reuse < len(prev),
+        )
         seq = array("q", prompt_ids)
         seq.extend(completion_ids)
         self._sequence = seq
         return turn
-
-
-def _is_prefix(prefix: array[int], ids: list[int]) -> bool:
-    return array("q", ids[: len(prefix)]) == prefix
 
 
 class TokenSequence(BaseModel):
@@ -94,7 +102,7 @@ class TokenSequence(BaseModel):
 
 
 class TokenTrace(BaseModel):
-    """Training sequences for a trajectory (normally exactly one)."""
+    """Training sequences for a trajectory (one per unbroken run of turns)."""
 
     sequences: list[TokenSequence] = Field(default_factory=list)
     exact: bool = True
@@ -105,6 +113,22 @@ class TokenTrace(BaseModel):
         return max(0, len(self.sequences) - 1)
 
 
+def iter_turn_samples(
+    turns: Iterable[TurnTokens | None],
+) -> Iterator[tuple[list[int], list[int], list[float] | None]]:
+    """Exact per-turn ``(prompt_ids, completion_ids, logprobs)``; skips uncaptured turns."""
+    prev: list[int] | None = None
+    for turn in turns:
+        if turn is None or turn.prompt_ids is None:
+            prev = None
+            continue
+        if turn.prompt_reuse and prev is None:
+            continue  # cannot reconstruct without the previous turn
+        prompt = (prev[: turn.prompt_reuse] if prev is not None else []) + turn.prompt_ids
+        yield prompt, turn.completion_ids, turn.logprobs
+        prev = prompt + turn.completion_ids
+
+
 def build_token_trace(turns: Iterable[TurnTokens | None]) -> TokenTrace | None:
     """Assemble per-turn tokens into sequences; ``None`` if nothing was captured."""
     sequences: list[TokenSequence] = []
@@ -112,25 +136,39 @@ def build_token_trace(turns: Iterable[TurnTokens | None]) -> TokenTrace | None:
     have_logprobs = True
     exact = True
     any_turn = False
+    prev_full: list[int] | None = None
     for turn in turns:
         if turn is None:
             exact = False
+            prev_full = None
+            current = None
             continue
         any_turn = True
         lps = turn.logprobs
         if lps is None or len(lps) != len(turn.completion_ids):
             have_logprobs = False
-        if turn.prompt_ids is not None:
-            current = TokenSequence(prompt_ids=list(turn.prompt_ids), response_logprobs=[])
-            sequences.append(current)
-        elif current is None:
-            exact = False  # prompt never captured: cannot anchor the sequence
+        if turn.prompt_ids is None or (turn.prompt_reuse and prev_full is None):
+            exact = False  # prompt not captured: cannot anchor this turn
+            prev_full = None
+            current = None
             continue
-        elif turn.prompt_delta_ids:
-            current.response_ids.extend(turn.prompt_delta_ids)
-            current.response_mask.extend([0] * len(turn.prompt_delta_ids))
+        continues = (
+            current is not None
+            and prev_full is not None
+            and not turn.prefix_break
+            and turn.prompt_reuse == len(prev_full)
+        )
+        if continues and current is not None:
+            env = turn.prompt_ids
+            current.response_ids.extend(env)
+            current.response_mask.extend([0] * len(env))
             if current.response_logprobs is not None:
-                current.response_logprobs.extend([0.0] * len(turn.prompt_delta_ids))
+                current.response_logprobs.extend([0.0] * len(env))
+            prompt_full = (prev_full or []) + env
+        else:
+            prompt_full = (prev_full[: turn.prompt_reuse] if prev_full else []) + turn.prompt_ids
+            current = TokenSequence(prompt_ids=prompt_full, response_logprobs=[])
+            sequences.append(current)
         current.response_ids.extend(turn.completion_ids)
         current.response_mask.extend([1] * len(turn.completion_ids))
         if current.response_logprobs is not None:
@@ -139,19 +177,29 @@ def build_token_trace(turns: Iterable[TurnTokens | None]) -> TokenTrace | None:
             else:
                 current.response_logprobs = None
         current.num_turns += 1
+        prev_full = prompt_full + turn.completion_ids
     if not any_turn:
         return None
-    for seq in sequences:
-        if not have_logprobs:
+    if not have_logprobs:
+        for seq in sequences:
             seq.response_logprobs = None
     return TokenTrace(sequences=sequences, exact=exact, has_logprobs=have_logprobs)
 
 
-def trace_from_messages(messages: Iterable[Any]) -> TokenTrace | None:
-    """Build a :class:`TokenTrace` from assistant messages carrying ``tokens``."""
-    turns = [
+def _assistant_turns(messages: Iterable[Any]) -> list[TurnTokens | None]:
+    return [
         getattr(m, "tokens", None)
         for m in messages
         if (m.role.value if hasattr(m.role, "value") else m.role) == "assistant"
     ]
-    return build_token_trace(turns)
+
+
+def trace_from_messages(messages: Iterable[Any]) -> TokenTrace | None:
+    """Build a :class:`TokenTrace` from assistant messages carrying ``tokens``."""
+    return build_token_trace(_assistant_turns(messages))
+
+
+def turn_samples_from_messages(
+    messages: Iterable[Any],
+) -> list[tuple[list[int], list[int], list[float] | None]]:
+    return list(iter_turn_samples(_assistant_turns(messages)))

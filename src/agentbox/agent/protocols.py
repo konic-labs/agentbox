@@ -13,6 +13,7 @@ import uuid
 from typing import Any
 
 from agentbox.trajectory.schema import FunctionCall, ToolCall
+from agentbox.utils.jsonparse import loads_lenient
 
 HERMES_TOOLS_PREAMBLE = """# Tools
 
@@ -44,8 +45,8 @@ def _new_id() -> str:
 
 def _to_call(blob: str) -> ToolCall:
     try:
-        data = json.loads(blob)
-    except json.JSONDecodeError:
+        data = loads_lenient(blob)
+    except ValueError:
         # Surface the malformed call to the agent instead of dropping it.
         return ToolCall(id=_new_id(), function=FunctionCall(name="invalid_tool_call", arguments=blob))
     if not isinstance(data, dict):

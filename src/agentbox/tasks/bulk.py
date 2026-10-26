@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
 
-from agentbox.tasks.loader import load_task
+from agentbox.tasks.loader import iter_tasks
 from agentbox.tasks.schema import Task
 
 
@@ -22,46 +21,30 @@ def save_task_dataset(tasks: Sequence[Task], directory: str | Path) -> list[Path
     return paths
 
 
-def load_task_dataset(directory: str | Path) -> list[Task]:
-    """Load all task.json files and task directories under a path."""
+def load_task_dataset(directory: str | Path, *, strict: bool = False) -> list[Task]:
+    """Load all tasks under a path (see :func:`iter_tasks` for formats)."""
     directory = Path(directory)
-    tasks: list[Task] = []
     if not directory.exists():
-        return tasks
-    for path in sorted(directory.rglob("task.json")):
-        tasks.append(load_task(path.parent))
-    for path in sorted(directory.glob("*.json")):
-        if path.name == "task.json":
-            continue
-        try:
-            tasks.append(Task.from_json(path))
-        except Exception:
-            continue
-    # de-dupe by task_id preserving order
-    seen: set[str] = set()
-    unique: list[Task] = []
-    for t in tasks:
-        if t.task_id in seen:
-            continue
-        seen.add(t.task_id)
-        unique.append(t)
-    return unique
+        return []
+    return list(iter_tasks(directory, strict=strict))
 
 
 def export_tasks_jsonl(tasks: Iterable[Task], path: str | Path) -> None:
+    import gzip
+    import io
+
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
+    raw = gzip.open(path, "wb") if path.suffix == ".gz" else path.open("wb")
+    with io.TextIOWrapper(raw, encoding="utf-8") as f:
         for task in tasks:
-            f.write(task.model_dump_json())
+            f.write(task.model_dump_json(exclude_defaults=True))
             f.write("\n")
 
 
+def iter_tasks_jsonl(path: str | Path) -> Iterator[Task]:
+    yield from iter_tasks(path)
+
+
 def import_tasks_jsonl(path: str | Path) -> list[Task]:
-    tasks: list[Task] = []
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        tasks.append(Task.model_validate(json.loads(line)))
-    return tasks
+    return list(iter_tasks(path))
