@@ -35,6 +35,10 @@ class ModelError(AgentBoxError):
     """LLM / model client error."""
 
 
+class ContextLengthError(ModelError):
+    """The request exceeded the model's context window (a policy failure, not infra)."""
+
+
 class TaskValidationError(AgentBoxError):
     """Task definition is invalid."""
 

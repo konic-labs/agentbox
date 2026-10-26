@@ -31,9 +31,17 @@ class Message(BaseModel):
     name: str | None = None
     reasoning_content: str | None = None
     raw: dict[str, Any] | None = None
+    # Per-turn bookkeeping (never sent to the model)
+    finish_reason: str | None = None
+    usage: dict[str, int] | None = None
+    latency_s: float | None = None
 
-    def to_openai_dict(self) -> dict[str, Any]:
-        """Convert to an OpenAI Chat Completions message dict."""
+    def to_openai_dict(self, *, include_reasoning: bool = False) -> dict[str, Any]:
+        """Convert to an OpenAI Chat Completions message dict.
+
+        Reasoning is omitted by default: most chat templates drop it and strict
+        servers reject the unknown field (GH #59).
+        """
         role = self.role.value if isinstance(self.role, MessageRole) else self.role
         msg: dict[str, Any] = {"role": role}
         if self.content is not None:
@@ -56,7 +64,7 @@ class Message(BaseModel):
             msg["tool_call_id"] = self.tool_call_id
         if self.name is not None:
             msg["name"] = self.name
-        if self.reasoning_content is not None:
+        if include_reasoning and self.reasoning_content is not None:
             msg["reasoning_content"] = self.reasoning_content
         return msg
 
@@ -69,6 +77,7 @@ class ToolCallRecord(BaseModel):
     result: str
     is_error: bool = False
     duration_s: float = 0.0
+    truncated: bool = False
 
 
 class TrajectoryMetrics(BaseModel):

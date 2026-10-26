@@ -23,7 +23,8 @@ from agentbox.tools.executor import ToolExecutor
 from agentbox.tools.registry import build_tool_registry
 from agentbox.trajectory.recorder import TrajectoryRecorder
 from agentbox.trajectory.schema import Trajectory
-from agentbox.types import FinalStatus, ToolMode
+from agentbox.types import FailureKind, FinalStatus, ToolMode
+from agentbox.utils.text import truncate_middle
 import random
 
 logger = logging.getLogger("agentbox.rollout")
@@ -105,7 +106,12 @@ class Rollout:
             drop_prob=agent_cfg.drop_tools_prob,
             rng=rng,
         )
-        executor = ToolExecutor(registry)
+        executor = ToolExecutor(
+            registry,
+            max_output_chars=agent_cfg.max_tool_output_chars,
+            tool_timeout_s=agent_cfg.tool_timeout_s,
+            parallel_read_only=agent_cfg.parallel_tool_calls,
+        )
         tool_schemas = executor.schemas()
 
         recorder = TrajectoryRecorder(
@@ -154,7 +160,7 @@ class Rollout:
 
             system = render_system_prompt(
                 workspace_dir=sandbox_cfg.workspace_dir,
-                mode=tool_mode if isinstance(tool_mode, (ToolMode, str)) else ToolMode.STRUCTURED,
+                mode=tool_mode,
                 extra=task.system_prompt_extra,
                 override=agent_cfg.system_prompt,
             )
@@ -165,6 +171,8 @@ class Rollout:
                 step=0,
                 run_id=run_id,
                 task_id=task.task_id,
+                tool_timeout_s=agent_cfg.tool_timeout_s,
+                max_output_chars=agent_cfg.max_tool_output_chars,
             )
             loop = AgentLoop(model_client, executor, agent_cfg)
             deadline = time.monotonic() + agent_cfg.episode_timeout_s
@@ -215,12 +223,10 @@ class Rollout:
             else:
                 final_status = FinalStatus.FAILED
 
-            # Cap verify logs so trajectories stay portable (agent self-tests
-            # are separate; these fields are the official suite ground truth).
+            # Cap verify logs so trajectories stay portable; keep head *and* tail
+            # (pytest summaries are at the end).
             def _trunc(s: str, n: int = 16_384) -> str:
-                if len(s) <= n:
-                    return s
-                return s[:n] + f"\n...[truncated {len(s) - n} chars]"
+                return truncate_middle(s, n)
 
             traj = recorder.finalize(
                 reward=reward,
@@ -234,6 +240,15 @@ class Rollout:
                     "verify_stdout": _trunc(verify_result.stdout or ""),
                     "verify_stderr": _trunc(verify_result.stderr or ""),
                     "stop_reason": loop_result.stop_reason,
+                    "failure_kind": (
+                        FailureKind.NONE.value
+                        if verify_result.success
+                        else (
+                            loop_result.failure_kind.value
+                            if loop_result.failure_kind != FailureKind.NONE
+                            else FailureKind.POLICY.value
+                        )
+                    ),
                     "tools_available": registry.names(),
                 },
             )
