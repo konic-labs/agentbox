@@ -20,7 +20,7 @@ from agentbox.tasks.generate.llm_validate import (
     merge_validation_reports,
     validate_task_llm,
 )
-from agentbox.tasks.generate.lm import build_dspy_lm, build_openai_client, configure_dspy_lm
+from agentbox.tasks.generate.lm import build_dspy_lm, build_openai_client
 from agentbox.tasks.generate.validate import (
     ValidationReport,
     parse_task_from_prediction,
@@ -129,23 +129,37 @@ class TaskGenerator:
         self._dspy_module: Any | None = None
         self._dspy_lm: Any | None = None
         self._dspy_validator_lm: Any | None = None
+        self._client: Any | None = None  # one AsyncOpenAI per role, reused (GH #84)
+        self._validator_client: Any | None = None
         if config.use_dspy:
             try:
                 from agentbox.tasks.generate.signatures import get_generator_module
 
-                # Build LMs once; concurrent calls use dspy.context(lm=...) — not re-configure
+                # Build LMs once; calls use dspy.context(lm=...) — no global configure
                 self._dspy_lm = build_dspy_lm(self.model_config)
                 self._dspy_validator_lm = build_dspy_lm(self.validator_model_config)
-                try:
-                    configure_dspy_lm(self.model_config, set_global=True)
-                except Exception:
-                    pass
                 self._dspy_module = get_generator_module()()
             except Exception as exc:
                 logger.warning("DSPy unavailable (%s); falling back to OpenAI JSON", exc)
                 self._dspy_module = None
                 self._dspy_lm = None
                 self._dspy_validator_lm = None
+
+    def _openai(self) -> Any:
+        if self._client is None:
+            self._client = build_openai_client(self.model_config)
+        return self._client
+
+    def _validator_openai(self) -> Any:
+        if self._validator_client is None:
+            self._validator_client = build_openai_client(self.validator_model_config)
+        return self._validator_client
+
+    async def aclose(self) -> None:
+        for client in (self._client, self._validator_client):
+            if client is not None:
+                await client.close()
+        self._client = self._validator_client = None
 
     async def generate(
         self,
@@ -290,6 +304,7 @@ class TaskGenerator:
                 use_dspy=self.config.use_dspy,
                 domain=domain,
                 dspy_lm=self._dspy_validator_lm or self._dspy_lm,
+                client=self._validator_openai(),
             )
             reports.append(llm_report)
 
@@ -321,6 +336,7 @@ class TaskGenerator:
             use_dspy=self.config.use_dspy,
             domain=domain,
             dspy_lm=self._dspy_validator_lm or self._dspy_lm,
+            client=self._validator_openai(),
         )
 
     async def _generate_once(
@@ -448,7 +464,7 @@ class TaskGenerator:
         *,
         two_stage: bool = False,
     ) -> Task:
-        client = build_openai_client(self.model_config)
+        client = self._openai()
         if two_stage:
             system = (
                 "You generate self-contained coding tasks for agents in Docker. "

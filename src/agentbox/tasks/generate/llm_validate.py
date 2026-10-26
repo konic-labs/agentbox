@@ -113,6 +113,7 @@ async def validate_task_llm(
     domain: str = "python",
     dspy_lm: Any | None = None,
     dspy_module: Any | None = None,
+    client: Any | None = None,
 ) -> ValidationReport:
     """Run DSPy (or OpenAI JSON fallback) structured judge on a Task."""
     payload = task_payload_for_judge(task)
@@ -145,6 +146,7 @@ async def validate_task_llm(
         difficulty=difficulty,
         claimed_domain=claimed_domain,
         min_score=min_score,
+        client=client,
     )
 
 
@@ -190,8 +192,10 @@ async def _validate_openai_json(
     difficulty: str,
     claimed_domain: str,
     min_score: float,
+    client: Any | None = None,
 ) -> ValidationReport:
-    client = build_openai_client(model_config)
+    owned = client is None
+    client = client or build_openai_client(model_config)
     system = (
         "You are a strict judge of coding tasks for software agents. "
         "Reply with a single JSON object only (no markdown) with keys: "
@@ -222,7 +226,11 @@ async def _validate_openai_json(
     }
     if model_config.extra_body:
         kwargs["extra_body"] = model_config.extra_body
-    resp = await client.chat.completions.create(**kwargs)
+    try:
+        resp = await client.chat.completions.create(**kwargs)
+    finally:
+        if owned:
+            await client.close()
     msg = resp.choices[0].message
     content = (msg.content or "").strip()
     if not content:

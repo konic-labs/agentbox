@@ -35,5 +35,6 @@ class ValidationCache:
             return None
 
     def put(self, task: Task, report: dict[str, Any]) -> None:
-        p = self._path(task_content_hash(task))
-        p.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        from agentbox.utils.io import atomic_write_text
+
+        atomic_write_text(self._path(task_content_hash(task)), json.dumps(report, indent=2))

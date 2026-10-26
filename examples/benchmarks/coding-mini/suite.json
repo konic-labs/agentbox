@@ -15,7 +15,30 @@
       "memory_mb": 512,
       "pids_limit": 256,
       "network_disabled": false,
-      "memswap_mb": null
+      "memswap_mb": null,
+      "shm_size_mb": null,
+      "nofile": null,
+      "read_only_rootfs": false,
+      "tmpfs": {}
+    },
+    "security": {
+      "cap_drop": [
+        "ALL"
+      ],
+      "cap_add": [
+        "CHOWN",
+        "DAC_OVERRIDE",
+        "FOWNER",
+        "FSETID",
+        "KILL",
+        "SETGID",
+        "SETUID",
+        "NET_BIND_SERVICE"
+      ],
+      "no_new_privileges": true,
+      "init": true,
+      "user": null,
+      "runtime": null
     },
     "auto_pull": true,
     "auto_remove": true,
@@ -25,7 +48,13 @@
       "sleep",
       "infinity"
     ],
-    "ensure_pytest": true
+    "ensure_pytest": true,
+    "shell": null,
+    "max_output_bytes": 262144,
+    "kill_output_bytes": 67108864,
+    "prepare_network": true,
+    "cache_setup": true,
+    "cache_max_images": 64
   },
   "agent": {
     "tools": "structured",
@@ -36,9 +65,14 @@
     "step_timeout_s": 120.0,
     "episode_timeout_s": 900.0,
     "parallel_tool_calls": true,
+    "tool_timeout_s": 120.0,
+    "max_tool_output_chars": 16000,
+    "tool_protocol": "native",
+    "tool_response_role": "tool",
     "drop_tools": [],
     "drop_tools_prob": 0.0,
     "include_thinking": true,
+    "send_reasoning": false,
     "step_penalty": 0.0,
     "timeout_penalty": 0.0,
     "max_steps_penalty": 0.0
@@ -48,7 +82,6 @@
   "seed": 42,
   "scoring": {
     "primary": "verifier",
-    "require_seed_ok": true,
     "setup_checks": [
       {
         "name": "python_ok",
@@ -57,13 +90,10 @@
         "timeout_s": 60.0,
         "required": true
       }
-    ],
-    "track_steps": true,
-    "track_duration": true,
-    "enable_ruler": false,
-    "ruler_group_size": 4
+    ]
   },
-  "content_hash": "e5fd126c08f924d17f09e471b09425fc426aa4ca754c080e63d63b02a74d5cd5",
+  "content_hash": "bf9a2f368e98e9c8624e784c1a5a7a2fac1cf89fe92c2763ca0ffb8d9348a228",
+  "hash_version": 2,
   "created_at": "2026-07-22T04:39:44.611290Z",
   "metadata": {}
 }

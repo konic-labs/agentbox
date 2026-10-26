@@ -1,4 +1,24 @@
-"""Load optional agentbox.yaml / agentbox.toml project config."""
+"""Project configuration (``agentbox.yaml`` / ``.toml`` / ``.json``) — GH #80.
+
+Example::
+
+    default_model: local
+    models:
+      local:
+        model: Qwen/Qwen3-1.7B
+        base_url: http://localhost:8000/v1
+        api_key: ${VLLM_API_KEY:-EMPTY}
+      judge:
+        model: gpt-4.1-mini
+        api_key: ${OPENAI_API_KEY:?set OPENAI_API_KEY}
+    sandbox: {image: python:3.12-slim-bookworm, limits: {memory_mb: 1024}}
+    agent: {max_steps: 30, tools: extended}
+    rewards: [{name: verifier}, {name: step_penalty, params: {per_step: 0.01}}]
+
+Interpolation: ``${VAR}``, ``${VAR:-default}``, ``${VAR:?error message}``.
+Legacy ``teacher`` / ``students`` sections keep working (students become
+model profiles).
+"""
 
 from __future__ import annotations
 
@@ -8,21 +28,35 @@ import re
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from agentbox.config import AgentConfig, ModelConfig, SandboxConfig
+from agentbox.errors import AgentBoxError
+from agentbox.rewards import RewardSpec
+
+CONFIG_NAMES = ("agentbox.yaml", "agentbox.yml", "agentbox.toml", "agentbox.json")
+_VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:-|:\?)([^}]*))?\}")
 
 
-class EndpointConfig(BaseModel):
+class ConfigError(AgentBoxError):
+    """Invalid or unreadable project configuration."""
+
+
+class EndpointConfig(ModelConfig):
+    """A named model endpoint (all :class:`ModelConfig` fields + ``id``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
     id: str | None = None
-    model: str
-    base_url: str | None = None
-    api_key: str | None = None
-    temperature: float = 0.7
-    max_tokens: int | None = 4096
     timeout_s: float = 180.0
-    extra_body: dict[str, Any] = Field(default_factory=dict)
+
+    def to_model_config(self) -> ModelConfig:
+        return ModelConfig.model_validate(self.model_dump(exclude={"id"}))
 
 
 class GenerateSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     concurrency: int = 8
     docker_concurrency: int = 8
     llm_judge: bool = True
@@ -33,20 +67,54 @@ class GenerateSection(BaseModel):
 
 
 class ProjectConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    default_model: str | None = None
+    models: dict[str, EndpointConfig] = Field(default_factory=dict)
+    sandbox: SandboxConfig | None = None
+    agent: AgentConfig | None = None
+    rewards: list[RewardSpec] | None = None
     teacher: EndpointConfig | None = None
     students: list[EndpointConfig] = Field(default_factory=list)
     generate: GenerateSection = Field(default_factory=GenerateSection)
     extra: dict[str, Any] = Field(default_factory=dict)
+    path: Path | None = None
+
+    def model(self, name: str | None = None) -> ModelConfig:
+        """Resolve a model profile (``None`` -> ``default_model``)."""
+        name = name or self.default_model
+        if name is None:
+            raise ConfigError("no model profile given and no default_model configured")
+        profiles = self.all_models()
+        if name not in profiles:
+            raise ConfigError(f"unknown model profile {name!r}; known: {sorted(profiles)}")
+        return profiles[name].to_model_config()
+
+    def all_models(self) -> dict[str, EndpointConfig]:
+        out = dict(self.models)
+        for s in self.students:
+            key = s.id or s.model.replace("/", "-").replace(":", "-")
+            out.setdefault(key, s)
+        if self.teacher is not None:
+            out.setdefault("teacher", self.teacher)
+        return out
 
 
-def _interp(value: Any) -> Any:
-    if not isinstance(value, str):
-        return value
-
+def interpolate(value: str) -> str:
     def repl(m: re.Match[str]) -> str:
-        return os.environ.get(m.group(1), "")
+        name, op, arg = m.group(1), m.group(2), m.group(3)
+        val = os.environ.get(name)
+        if val:
+            return val
+        if op == ":-":
+            return arg or ""
+        if op == ":?":
+            raise ConfigError(arg or f"environment variable {name} is required")
+        if val is None:
+            raise ConfigError(f"environment variable {name} is not set (use ${{{name}:-default}})")
+        return val
 
-    return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", repl, value)
+    return _VAR.sub(repl, value)
 
 
 def _walk_interp(obj: Any) -> Any:
@@ -54,54 +122,63 @@ def _walk_interp(obj: Any) -> Any:
         return {k: _walk_interp(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_walk_interp(v) for v in obj]
-    return _interp(obj)
+    if isinstance(obj, str):
+        return interpolate(obj)
+    return obj
 
 
 def find_config_path(start: Path | None = None) -> Path | None:
     env = os.environ.get("AGENTBOX_CONFIG")
     if env:
         p = Path(env)
-        return p if p.exists() else None
+        if not p.exists():
+            raise ConfigError(f"AGENTBOX_CONFIG points to a missing file: {p}")
+        return p
     cur = (start or Path.cwd()).resolve()
     for d in [cur, *cur.parents]:
-        for name in ("agentbox.yaml", "agentbox.yml", "agentbox.toml", "agentbox.json"):
+        for name in CONFIG_NAMES:
             p = d / name
             if p.exists():
                 return p
-        if d.parent == d:
-            break
     return None
 
 
-def load_project_config(path: Path | None = None) -> ProjectConfig:
-    """Load project config; returns defaults if no file found."""
+def _read(path: Path) -> dict[str, Any]:
+    text = path.read_text(encoding="utf-8")
+    try:
+        if path.suffix in {".yaml", ".yml"}:
+            import yaml
+
+            data = yaml.safe_load(text) or {}
+        elif path.suffix == ".toml":
+            import tomllib
+
+            data = tomllib.loads(text)
+        else:
+            data = json.loads(text)
+    except Exception as exc:
+        raise ConfigError(f"cannot parse {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ConfigError(f"{path}: top level must be a mapping")
+    return data
+
+
+def load_project_config(path: Path | None = None, *, required: bool = False) -> ProjectConfig:
+    """Load the project config; defaults when no file is found (unless ``required``)."""
     p = path or find_config_path()
     if p is None:
+        if required:
+            raise ConfigError("no agentbox.yaml found (run `agentbox init`)")
         return ProjectConfig()
-    text = p.read_text(encoding="utf-8")
-    data: dict[str, Any]
-    if p.suffix in {".yaml", ".yml"}:
-        try:
-            import yaml  # type: ignore
-        except ImportError as exc:
-            raise ImportError(
-                "PyYAML required for agentbox.yaml (pip install pyyaml)"
-            ) from exc
-        data = yaml.safe_load(text) or {}
-    elif p.suffix == ".toml":
-        try:
-            import tomllib
-        except ImportError:
-            import tomli as tomllib  # type: ignore
-        data = tomllib.loads(text)
-    else:
-        data = json.loads(text)
-    data = _walk_interp(data)
-    # students may be under students or models
-    if "models" in data and "students" not in data:
+    data = _walk_interp(_read(p))
+    if "models" in data and isinstance(data["models"], list):  # legacy list form
         data["students"] = data.pop("models")
-    known = {"teacher", "students", "generate"}
+    known = set(ProjectConfig.model_fields) - {"extra", "path"}
     extra = {k: v for k, v in data.items() if k not in known}
-    cfg = ProjectConfig.model_validate({k: data[k] for k in known if k in data})
+    try:
+        cfg = ProjectConfig.model_validate({k: v for k, v in data.items() if k in known})
+    except ValidationError as exc:
+        raise ConfigError(f"invalid {p}:\n{exc}") from exc
     cfg.extra = extra
+    cfg.path = p
     return cfg
