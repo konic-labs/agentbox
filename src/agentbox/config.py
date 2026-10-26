@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from agentbox.rewards import RewardSpec
 from agentbox.types import ToolMode
 
 # Capabilities kept after ``cap_drop=["ALL"]``: enough for package managers
@@ -205,6 +206,10 @@ class RolloutConfig(BaseModel):
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     model: ModelConfig
     agent: AgentConfig = Field(default_factory=AgentConfig)
+    rewards: list[RewardSpec] | None = Field(
+        default=None,
+        description="Weighted reward components; default: verifier + AgentConfig penalties",
+    )
     seed: int | None = None
     save_dir: Path | None = None
     trajectory_format: Literal["json", "jsonl", "art_dict"] = "json"

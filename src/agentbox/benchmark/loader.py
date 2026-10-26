@@ -32,13 +32,6 @@ def load_suite(path: str | Path) -> BenchmarkSuite:
 
     tasks = load_task_dataset(tasks_dir)
     if not tasks:
-        # try single-level task.json dirs only already covered; try direct json
-        for p in sorted(tasks_dir.glob("*.json")):
-            try:
-                tasks.append(Task.from_json(p))
-            except TaskValidationError:
-                continue
-    if not tasks:
         raise BenchmarkError(f"No tasks found under {tasks_dir}")
 
     # Fairness: benchmarks should not carry custom_tools blobs
@@ -55,18 +48,8 @@ def save_suite(suite: BenchmarkSuite, path: str | Path) -> Path:
     tasks_dir.mkdir(parents=True, exist_ok=True)
 
     for task in suite.tasks:
-        task_dir = tasks_dir / task.task_id
-        task_dir.mkdir(parents=True, exist_ok=True)
-        # Write starter files into files/ and strip from task.json for cleanliness
-        files_dir = task_dir / "files"
-        if task.starter_files:
-            files_dir.mkdir(parents=True, exist_ok=True)
-            for rel, content in task.starter_files.items():
-                fp = files_dir / rel
-                fp.parent.mkdir(parents=True, exist_ok=True)
-                fp.write_text(content, encoding="utf-8")
-        slim = task.model_copy(update={"starter_files": {}})
-        slim.save_json(task_dir / "task.json")
+        # starter files go to files/ (text or binary); task.json stays slim
+        task.save_dir(tasks_dir / task.task_id)
 
     # Serialize agent without custom_tools
     m = suite.manifest.model_copy(deep=True)
@@ -94,26 +77,7 @@ def create_suite_from_tasks(
 ) -> BenchmarkSuite:
     """Create a suite directory from a tasks folder or dataset."""
     src = Path(tasks_src)
-    tasks = load_task_dataset(src)
-    if not tasks and src.is_dir():
-        for p in sorted(src.rglob("task.json")):
-            try:
-                tasks.append(Task.from_dir(p.parent))
-            except TaskValidationError:
-                continue
-        for p in sorted(src.glob("*.json")):
-            try:
-                tasks.append(Task.from_json(p))
-            except TaskValidationError:
-                continue
-    # de-dupe
-    seen: set[str] = set()
-    unique: list[Task] = []
-    for t in tasks:
-        if t.task_id in seen:
-            continue
-        seen.add(t.task_id)
-        unique.append(t)
+    unique = load_task_dataset(src)  # already de-duplicated by task_id
     if not unique:
         raise BenchmarkError(f"No tasks found in {src}")
 

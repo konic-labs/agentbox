@@ -35,9 +35,10 @@ class TaskSeeder:
         t0 = time.monotonic()
         setup_results: list[ExecResult] = []
         try:
-            if task.starter_files:
-                await self.manager.write_files(sandbox, task.starter_files)
-            files_written = len(task.starter_files)
+            files = task.seed_files()
+            if files:
+                await self.manager.write_files(sandbox, files)
+            files_written = len(files)
 
             for cmd in task.setup_commands:
                 result = await self.manager.exec(sandbox, cmd, timeout_s=300.0)

@@ -29,7 +29,7 @@ from agentbox.model.base import ModelClient
 from agentbox.model.openai_compat import OpenAICompatClient
 from agentbox.sandbox.manager import SandboxManager
 from agentbox.sandbox.types import Sandbox
-from agentbox.tasks.rewards import shaped_reward
+from agentbox.rewards import RewardContext, compute_reward, default_reward_specs
 from agentbox.tasks.schema import Task
 from agentbox.tasks.seeder import TaskSeeder
 from agentbox.tasks.verifier import Verifier, VerifyResult
@@ -55,6 +55,33 @@ def derive_seed(seed: int | None, task_id: str, sample_index: int) -> int | None
 
 def task_hash(task: Task) -> str:
     return hashlib.sha256(task.model_dump_json().encode()).hexdigest()[:16]
+
+
+def effective_sandbox(base: SandboxConfig, task: Task) -> SandboxConfig:
+    """Merge a task's environment overrides over the run's sandbox config."""
+    env = task.environment
+    if env is None:
+        return base
+    update: dict[str, Any] = {}
+    if env.image:
+        update["image"] = env.image
+    if env.env:
+        update["env"] = {**base.env, **env.env}
+    if env.working_dir:
+        update["working_dir"] = env.working_dir
+        update["workspace_dir"] = env.working_dir
+    if env.ensure_pytest is not None:
+        update["ensure_pytest"] = env.ensure_pytest
+    limits: dict[str, Any] = {}
+    if env.network is not None:
+        limits["network_disabled"] = not env.network
+    if env.cpu_count is not None:
+        limits["cpu_count"] = env.cpu_count
+    if env.memory_mb is not None:
+        limits["memory_mb"] = env.memory_mb
+    if limits:
+        update["limits"] = base.limits.model_copy(update=limits)
+    return base.model_copy(update=update) if update else base
 
 
 def resolve_model(
@@ -171,11 +198,16 @@ async def _run(
     created_at = datetime.now(timezone.utc)
     run_id = run_id or (config.run_id if config else None) or uuid.uuid4().hex
     rollout_id = rollout_id or uuid.uuid4().hex
-    sandbox_cfg = sandbox or (manager.config if manager else None) or (
+    run_sandbox = sandbox or (manager.config if manager else None) or (
         config.sandbox if config else SandboxConfig()
     )
+    sandbox_cfg = effective_sandbox(run_sandbox, task)
     agent_cfg = resolve_agent_config(agent, config, task)
-    mgr = manager or SandboxManager(sandbox_cfg)
+    if manager is not None and sandbox_cfg is manager.config:
+        mgr = manager
+    else:
+        mgr = SandboxManager(sandbox_cfg, backend=manager.backend if manager else None)
+    reward_specs = (config.rewards if config else None) or default_reward_specs(agent_cfg)
     base_seed = config.seed if config else None
     sample_seed = derive_seed(base_seed, task.task_id, sample_index)
 
@@ -213,6 +245,7 @@ async def _run(
         status: FinalStatus,
         failure: FailureKind,
         reward: float = 0.0,
+        breakdown: dict[str, float] | None = None,
         messages: list[Message] | None = None,
         loop: AgentLoopResult | None = None,
         verify: VerifyResult | None = None,
@@ -256,6 +289,7 @@ async def _run(
             messages=messages if messages is not None else (loop.messages if loop else []),
             tool_call_records=records,
             reward=reward,
+            reward_breakdown=breakdown or {},
             final_status=status,
             stop_reason=loop.stop_reason if loop else None,
             failure_kind=failure,
@@ -270,28 +304,58 @@ async def _run(
     outcome: FinalStatus | None = None
     try:
         t0 = time.monotonic()
+        cached_image: str | None = None
+        if sandbox_cfg.cache_setup and task.setup_commands:
+            # Run setup once per environment and start from the snapshot (GH #24).
+            try:
+                base_image = await mgr.resolve_image()
+                cached_image = await mgr.backend.derive_image(
+                    base_image,
+                    steps=list(task.setup_commands),
+                    files=task.seed_files(),
+                    workdir=sandbox_cfg.workspace_dir,
+                    env=sandbox_cfg.env,
+                    network=sandbox_cfg.prepare_network or not sandbox_cfg.limits.network_disabled,
+                    shell=mgr.shell_for(base_image),
+                    step_timeout_s=300.0,
+                    key_extra={"purpose": "setup"},
+                    max_images=sandbox_cfg.cache_max_images,
+                )
+            except Exception as exc:
+                metrics.seed_s = time.monotonic() - t0
+                outcome = FinalStatus.ERROR
+                return build(
+                    status=FinalStatus.ERROR,
+                    failure=FailureKind.SEED,
+                    error=f"setup failed: {exc}",
+                )
+            metrics.seed_s = time.monotonic() - t0
+        t_create = time.monotonic()
         try:
             handle = await mgr.create(
                 task_id=task.task_id,
                 run_id=run_id,
                 rollout_id=rollout_id,
                 labels={"agentbox.group_id": group_id} if group_id else None,
+                image=cached_image,
+                resolve=cached_image is None,
             )
         except Exception as exc:
             logger.warning("sandbox create failed for %s: %s", task.task_id, exc)
             outcome = FinalStatus.ERROR
             return build(status=FinalStatus.ERROR, failure=FailureKind.SANDBOX, error=str(exc))
-        metrics.sandbox_create_s = time.monotonic() - t0
+        metrics.sandbox_create_s = time.monotonic() - t_create
 
-        seed = await TaskSeeder(mgr).seed(handle, task)
-        metrics.seed_s = seed.duration_s
-        if not seed.ok:
-            outcome = FinalStatus.ERROR
-            return build(
-                status=FinalStatus.ERROR,
-                failure=FailureKind.SEED,
-                error=seed.error or "task seed failed",
-            )
+        if cached_image is None:
+            seed = await TaskSeeder(mgr).seed(handle, task)
+            metrics.seed_s = seed.duration_s
+            if not seed.ok:
+                outcome = FinalStatus.ERROR
+                return build(
+                    status=FinalStatus.ERROR,
+                    failure=FailureKind.SEED,
+                    error=seed.error or "task seed failed",
+                )
 
         if setup_checks:
             from agentbox.benchmark.setup_check import SetupChecker
@@ -331,14 +395,14 @@ async def _run(
         deadline = time.monotonic() + agent_cfg.episode_timeout_s
         loop_result = await loop.run(
             system_prompt=system,
-            user_prompt=task.prompt_text() if hasattr(task, "prompt_text") else task.description,
+            user_prompt=task.prompt_text(),
             ctx=ctx,
             episode_deadline=deadline,
         )
 
         t1 = time.monotonic()
         try:
-            verify_result = await Verifier(mgr).verify(handle, task.verifier)
+            verify_result = await Verifier(mgr).verify(handle, task.verifier, task)
         except Exception as exc:
             logger.warning("verifier crashed for %s: %s", task.task_id, exc)
             metrics.verify_s = time.monotonic() - t1
@@ -351,14 +415,8 @@ async def _run(
             )
         metrics.verify_s = time.monotonic() - t1
 
-        reward = shaped_reward(
-            verify_result,
-            steps=loop_result.steps,
-            step_penalty=agent_cfg.step_penalty,
-            timeout=loop_result.stop_reason == StopReason.TIMEOUT.value,
-            timeout_penalty=agent_cfg.timeout_penalty,
-            max_steps_hit=loop_result.stop_reason == StopReason.MAX_STEPS.value,
-            max_steps_penalty=agent_cfg.max_steps_penalty,
+        reward, breakdown = await compute_reward(
+            reward_specs, RewardContext(task=task, verify=verify_result, loop=loop_result)
         )
         if verify_result.success:
             status, failure = FinalStatus.SUCCESS, FailureKind.NONE
@@ -378,6 +436,7 @@ async def _run(
             status=status,
             failure=failure,
             reward=reward,
+            breakdown=breakdown,
             loop=loop_result,
             verify=verify_result,
             error=loop_result.error,

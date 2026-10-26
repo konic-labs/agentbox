@@ -23,6 +23,7 @@ from agentbox.tools.base import _CURRENT, BaseTool, ToolContext, ToolResult
 from agentbox.tools.registry import ToolRegistry
 from agentbox.trajectory.schema import Message, ToolCall, ToolCallRecord
 from agentbox.types import MessageRole
+from agentbox.utils.jsonparse import loads_lenient
 from agentbox.utils.text import truncate_middle
 
 _TIMEOUT_GRACE_S = 5.0
@@ -42,9 +43,9 @@ def parse_arguments(raw: str | None) -> tuple[dict[str, Any] | None, str | None]
     if raw is None or raw.strip() == "":
         return {}, None
     try:
-        value = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        return None, f"arguments are not valid JSON ({exc.msg} at char {exc.pos})"
+        value = loads_lenient(raw)
+    except ValueError as exc:
+        return None, f"arguments are not valid JSON ({exc})"
     if not isinstance(value, dict):
         return None, "arguments must be a JSON object"
     return value, None
