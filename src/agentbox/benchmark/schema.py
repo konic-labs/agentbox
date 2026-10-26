@@ -26,15 +26,12 @@ class SetupCheckSpec(BaseModel):
 
 
 class ScoringConfig(BaseModel):
-    """How a suite scores rollouts."""
+    """How a suite scores rollouts (the task verifier is the ground truth)."""
+
+    model_config = ConfigDict(extra="ignore")  # tolerate removed v1 fields
 
     primary: Literal["verifier"] = "verifier"
-    require_seed_ok: bool = True
     setup_checks: list[SetupCheckSpec] = Field(default_factory=list)
-    track_steps: bool = True
-    track_duration: bool = True
-    enable_ruler: bool = False
-    ruler_group_size: int = 4
 
 
 def _default_bench_agent() -> AgentConfig:
@@ -62,6 +59,7 @@ class BenchmarkSuiteManifest(BaseModel):
     seed: int | None = 42
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
     content_hash: str | None = None
+    hash_version: int | None = None
     created_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -83,9 +81,12 @@ class BenchmarkSuite(BaseModel):
     def freeze(self) -> BenchmarkSuite:
         from agentbox.benchmark.hash import compute_suite_content_hash
 
+        from agentbox.benchmark.hash import HASH_VERSION
+
         m = self.manifest.model_copy(deep=True)
         m.created_at = m.created_at or datetime.now(timezone.utc)
         m.content_hash = compute_suite_content_hash(self.tasks, m)
+        m.hash_version = HASH_VERSION
         return BenchmarkSuite(root=self.root, manifest=m, tasks=list(self.tasks))
 
     def verify_integrity(self, *, strict: bool = False) -> bool:
@@ -96,11 +97,17 @@ class BenchmarkSuite(BaseModel):
             if strict:
                 raise SuiteIntegrityError("Suite has no content_hash; run freeze()")
             return True
+        from agentbox.benchmark.hash import HASH_VERSION
+
         current = compute_suite_content_hash(self.tasks, self.manifest)
         ok = current == self.manifest.content_hash
         if not ok and strict:
+            hint = ""
+            if (self.manifest.hash_version or 1) < HASH_VERSION:
+                hint = " (suite frozen by an older AgentBox; run `agentbox bench freeze`)"
             raise SuiteIntegrityError(
-                f"Suite integrity check failed: expected {self.manifest.content_hash}, got {current}"
+                f"Suite integrity check failed: expected {self.manifest.content_hash}, "
+                f"got {current}{hint}"
             )
         return ok
 
@@ -122,8 +129,11 @@ class BenchmarkRunConfig(BaseModel):
     save_trajectories: bool = True
     output_dir: Path
     progress: bool = True
-    fail_fast: bool = False
+    fail_fast: bool = Field(
+        default=False, description="Stop a model's run at its first infrastructure failure."
+    )
     strict_integrity: bool = False
+    resume: bool = Field(default=False, description="Skip rollouts already in output_dir.")
     tags: dict[str, str] = Field(default_factory=dict)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -136,12 +146,14 @@ class TaskResult(BaseModel):
     n: int = 0
     successes: int = 0
     pass_at_1: float = 0.0
-    pass_at_k: float | None = None
+    pass_at_k: float | None = None  # pass@n (k = samples per task)
+    pass_at: dict[str, float] = Field(default_factory=dict)  # unbiased pass@k, k <= n
     mean_reward: float = 0.0
     mean_steps: float = 0.0
     mean_duration_s: float = 0.0
     seed_errors: int = 0
     setup_check_failures: int = 0
+    infra_failures: int = 0
     statuses: dict[str, int] = Field(default_factory=dict)
 
 
@@ -152,6 +164,7 @@ class ModelReport(BaseModel):
     by_task: list[TaskResult] = Field(default_factory=list)
     wall_clock_s: float = 0.0
     pass_at_k_mean: float | None = None
+    pass_at: dict[str, float] = Field(default_factory=dict)
 
 
 class BenchmarkReport(BaseModel):
@@ -167,8 +180,8 @@ class BenchmarkReport(BaseModel):
     models: list[ModelReport] = Field(default_factory=list)
     leaderboard: list[dict[str, Any]] = Field(default_factory=list)
     pass_at_k_definition: str = (
-        "pass_at_k = fraction of tasks with >=1 success among n_per_task rollouts; "
-        "pass_at_1 = mean per-task success rate of first/all rollouts"
+        "unbiased estimator pass@k = 1 - C(n-c, k) / C(n, k) per task (Chen et al., 2021), "
+        "averaged over tasks; pass@n (pass_at_k) = fraction of tasks with >= 1 success"
     )
 
     def save_json(self, path: str | Path) -> None:

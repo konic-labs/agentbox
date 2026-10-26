@@ -12,8 +12,11 @@ def to_art_dict(
     traj: Trajectory, *, tools: list[dict[str, Any]] | None = None
 ) -> dict[str, Any]:
     """Export a portable dict matching OpenPipe ART Trajectory shape."""
-    messages_and_choices = [m.to_openai_dict() for m in traj.messages]
-    correct = 1.0 if traj.final_status == FinalStatus.SUCCESS else 0.0
+    messages_and_choices = [m.to_openai_dict(include_reasoning=True) for m in traj.messages]
+    if traj.verify is not None:
+        correct = 1.0 if traj.verify.success else 0.0
+    else:
+        correct = 1.0 if traj.final_status == FinalStatus.SUCCESS else 0.0
     metrics: dict[str, float | int | bool] = {
         "duration": traj.metrics.duration_s,
         "steps": traj.metrics.steps,
@@ -28,9 +31,18 @@ def to_art_dict(
     metadata: dict[str, Any] = {
         "task_id": traj.task_id,
         "run_id": traj.run_id,
+        "rollout_id": traj.rollout_id,
         "final_status": traj.final_status.value,
+        "failure_kind": str(getattr(traj.failure_kind, "value", traj.failure_kind)),
         **traj.metadata,
     }
+    if traj.group_id is not None:
+        metadata["group_id"] = traj.group_id
+    if traj.stop_reason is not None:
+        metadata["stop_reason"] = traj.stop_reason
+    if traj.verify is not None:
+        metadata["verify_exit_code"] = traj.verify.exit_code
+        metadata["verify_success"] = traj.verify.success
     if traj.model:
         metadata["model"] = traj.model
     if traj.error:

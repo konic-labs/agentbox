@@ -84,8 +84,15 @@ async def test_mock_fizzbuzz_rollout() -> None:
     assert traj.reward == 1.0
     assert traj.metrics.steps >= 1
     # Official verifier ground truth (P0.2)
-    assert traj.metadata.get("verify_success") is True
-    assert traj.metadata.get("verify_exit_code") == 0
-    assert "pytest" in (traj.metadata.get("verify_command") or "")
-    assert "verify_stdout" in traj.metadata
-    assert "verify_stderr" in traj.metadata
+    assert traj.verify is not None
+    assert traj.verify.success is True
+    assert traj.verify.exit_code == 0
+    assert "pytest" in traj.verify.command
+    assert "passed" in traj.verify.stdout
+    assert traj.failure_kind == "none" and traj.is_trainable
+    assert traj.rollout_id and traj.rollout_id != traj.run_id
+    # v2 files round-trip and v1 files are upgraded on load
+    from agentbox.trajectory.schema import Trajectory
+
+    again = Trajectory.model_validate_json(traj.to_json())
+    assert again.verify == traj.verify

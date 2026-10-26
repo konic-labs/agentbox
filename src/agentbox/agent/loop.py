@@ -133,12 +133,14 @@ class AgentLoop:
         *,
         on_step: Callable[[int, Message], Awaitable[None] | None] | None = None,
         hooks: AgentHooks | None = None,
+        model_kwargs: dict[str, Any] | None = None,
     ) -> None:
         self.model = model
         self.tools = tools
         self.config = config
         self.on_step = on_step
         self.hooks = hooks
+        self.model_kwargs = dict(model_kwargs or {})
 
     def _budget(self, deadline: float | None) -> float:
         budget = self.config.step_timeout_s
@@ -211,6 +213,7 @@ class AgentLoop:
                             convo.payload(),
                             tools=None if hermes else (schemas or None),
                             tool_choice=None,
+                            **self.model_kwargs,
                         ),
                         timeout=budget,
                     )

@@ -17,29 +17,10 @@ def resolve_trajectory_paths(
     *,
     model_id: str | None = None,
 ) -> list[Path]:
-    """Resolve traj JSON files from a file, dir, or bench run directory."""
-    source = Path(source)
-    if source.is_file() and source.suffix == ".json":
-        return [source]
-    if not source.is_dir():
-        return []
-    # bench run: models/<id>/trajectories
-    models = source / "models"
-    if models.is_dir():
-        if model_id:
-            d = models / model_id / "trajectories"
-            return sorted(d.glob("*.json")) if d.is_dir() else []
-        paths: list[Path] = []
-        for d in sorted(models.glob("*/trajectories")):
-            paths.extend(sorted(d.glob("*.json")))
-        if paths:
-            return paths
-    # flat trajectories dir
-    direct = sorted(source.glob("*.json"))
-    if direct:
-        return direct
-    nested = sorted(source.rglob("*.json"))
-    return [p for p in nested if p.name != "report.json" and "suite" not in p.parts]
+    """Resolve trajectory files from a file, dir, or bench run directory."""
+    from agentbox.trajectory.io import trajectory_files
+
+    return trajectory_files(source, model_id=model_id)
 
 
 def _esc(s: Any) -> str:
@@ -71,8 +52,7 @@ def render_html(
 ) -> Path:
     """Write a pure HTML+CSS dashboard; returns output path."""
     n = len(trajs)
-    n_ok = sum(1 for t in trajs if str(t.final_status) in ("success", "FinalStatus.SUCCESS") or getattr(t.final_status, "value", None) == "success")
-    # normalize status
+
     def status_val(t: Trajectory) -> str:
         s = t.final_status
         return s.value if hasattr(s, "value") else str(s)
@@ -87,10 +67,10 @@ def render_html(
     for t in trajs:
         st = status_val(t)
         sc = "ok" if st == "success" else ("err" if st == "error" else "fail")
-        meta = t.metadata or {}
-        verify_cmd = meta.get("verify_command") or "—"
-        verify_exit = meta.get("verify_exit_code")
-        verify_ok = meta.get("verify_success")
+        v = t.verify
+        verify_cmd = (v.command if v else "") or "—"
+        verify_exit = v.exit_code if v else None
+        verify_ok = v.success if v else None
         if verify_ok is None and verify_exit is not None:
             verify_ok = verify_exit == 0
         vcls = "ok" if verify_ok else ("fail" if verify_exit is not None else "unk")
@@ -121,9 +101,7 @@ def render_html(
                 elif "all tests passed" in res.lower() or re.search(
                     r"\d+\s+passed", res.lower()
                 ):
-                    agent_pass = "failed" not in res.lower().split("passed")[0][-20:] if False else (
-                        not re.search(r"\d+\s+failed", res.lower())
-                    )
+                    agent_pass = not re.search(r"\d+\s+failed", res.lower())
                 agent_summary = f"{r.name} @ step {r.step}"
                 agent_detail = _short(res, 1200)
                 break
@@ -185,8 +163,8 @@ def render_html(
 
         vmark = "✓" if verify_ok else ("✗" if verify_exit is not None else "?")
         err_html = f"<p class='err'>{_esc(t.error)}</p>" if t.error else ""
-        v_stdout = meta.get("verify_stdout")
-        v_stderr = meta.get("verify_stderr")
+        v_stdout = v.stdout if v else None
+        v_stderr = v.stderr if v else None
         v_out_html = (
             f"<pre class='vout'>{_esc(_short(v_stdout, 1500))}</pre>" if v_stdout else ""
         )
@@ -208,7 +186,7 @@ def render_html(
             f"<h2><a href='#{_esc(anchor)}'>{_esc(t.task_id)}</a> "
             f"<span class='pill {sc}'>{_esc(st)}</span></h2>"
             f"<div class='stats'>"
-            f"<div><s>reward</s><b>{t.reward:.0f}</b></div>"
+            f"<div><s>reward</s><b>{t.reward:.2f}</b></div>"
             f"<div><s>steps</s><b>{t.metrics.steps}</b></div>"
             f"<div><s>tools</s><b>{t.metrics.tool_calls}</b></div>"
             f"<div><s>duration</s><b>{t.metrics.duration_s:.1f}s</b></div>"
