@@ -220,12 +220,26 @@ class Trajectory(BaseModel):
 
     def to_art_dict(self) -> dict[str, Any]:
         """Deprecated: use :func:`agentbox.integrations.art.to_art_dict`."""
-        from agentbox.trajectory.formats.art import to_art_dict
+        import warnings
 
+        from agentbox.integrations.art import to_art_dict
+
+        warnings.warn(
+            "Trajectory.to_art_dict() is deprecated; use agentbox.integrations.art.to_art_dict",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return to_art_dict(self)
 
     def to_art(self) -> Any:
         """Deprecated: use :func:`agentbox.integrations.art.to_art_trajectory`."""
-        from agentbox.trajectory.formats.art import to_art
+        import warnings
 
-        return to_art(self)
+        from agentbox.integrations.art import to_art_trajectory
+
+        warnings.warn(
+            "Trajectory.to_art() is deprecated; use agentbox.integrations.art.to_art_trajectory",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return to_art_trajectory(self)
