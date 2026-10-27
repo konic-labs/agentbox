@@ -335,6 +335,9 @@ def traj_export(
     ] = False,
     per_turn: Annotated[bool, typer.Option("--per-turn", help="tokens: one row per turn")] = False,
     drop_zero_variance: Annotated[bool, typer.Option("--drop-zero-variance", help="grpo")] = False,
+    advantage: Annotated[
+        str, typer.Option("--advantage", help="grpo: grpo|drgrpo|rloo advantages")
+    ] = "grpo",
     min_margin: Annotated[float, typer.Option("--min-margin", help="dpo")] = 0.5,
     push_to_hub: Annotated[str | None, typer.Option("--push-to-hub", help="hf: repo id")] = None,
 ) -> None:
@@ -344,6 +347,8 @@ def traj_export(
 
     if fmt not in available_formats():
         fail(f"unknown format {fmt!r}; available: {available_formats()}")
+    if advantage not in ("grpo", "drgrpo", "rloo", "mean"):
+        fail(f"unknown advantage {advantage!r}; use grpo, drgrpo or rloo")
     stats = export(
         iter_trajectories(source),
         fmt,
@@ -353,6 +358,7 @@ def traj_export(
         ),
         per_turn=per_turn,
         drop_zero_variance=drop_zero_variance,
+        advantage=advantage,
         min_margin=min_margin,
         push_to_hub=push_to_hub,
     )
