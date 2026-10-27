@@ -1,87 +1,60 @@
 # Development
 
-Contributing and extending AgentBox.
-
-## Install (dev)
+## Setup
 
 ```bash
-git clone https://github.com/konic-labs/agentbox.git
-cd agentbox
-uv venv .venv --seed --python 3.12
-source .venv/bin/activate
-uv pip install -e ".[dev]"
+git clone https://github.com/konic-labs/agentbox.git && cd agentbox
+uv venv --python 3.12 && source .venv/bin/activate
+uv pip install -e ".[dev]"                 # + ".[hf,trl,server,generate]" as needed
 ```
 
-Optional: `.[rich]`, `.[art]`, `.[generate]`.
+## Checks
+
+```bash
+ruff check src tests examples scripts
+ruff format --check src tests examples scripts
+mypy src                                   # strict
+pytest tests/unit -q                       # no Docker, a few seconds
+pytest tests/integration -m docker -q      # real sandboxes, about 40 s
+bash scripts/ci_smoke.sh --docker          # every CLI workflow with the mock model
+python scripts/gen_reference_docs.py       # regenerate docs/cli-reference.md and docs/config-reference.md
+```
+
+CI (`.github/workflows/ci.yml`) runs lint, types and the reference-docs check;
+unit tests on Python 3.11, 3.12 and 3.13; Docker integration tests plus the
+Docker smoke test; and a build with `twine check --strict` and a clean wheel
+install.
 
 ## Tests
 
-```bash
-pytest tests/unit -q
-pytest tests/integration -q -m docker
-```
-
-| Suite | Docker | Focus |
+| Directory | Needs | Covers |
 | --- | --- | --- |
-| `tests/unit` | No | Paths, tools, loop, schema, ART dict, filters, metrics |
-| `tests/integration` | Yes | Sandbox I/O, mock rollouts, parallel |
+| `tests/unit` | nothing | Loop semantics (ordering, deadlines, protocols, salvage, hooks), tools with a fake sandbox, model client retries and token capture, TITO, rewards, exporters, adapters with fake trainers, CLI via `CliRunner`, warm pool bookkeeping |
+| `tests/integration` (`@pytest.mark.docker`) | Docker | Sandbox I/O, timeouts and output caps, hostile paths, security defaults, verifier integrity (tampering, hidden tests, partial credit), caches, warm pool, kept sandboxes, 32-sandbox stress run, CLI and server end to end, TRL/SkyRL/OpenRLHF adapter episodes |
 
-Mark: `@pytest.mark.docker`. Skip when daemon unavailable.
+Docker tests skip when no daemon is reachable. Prefer `MockModelClient` /
+`FunctionModelClient` to drive the loop deterministically; a shared mock plays
+its script per conversation, so it is safe under concurrency.
 
-Hermetic preference: use `MockModelClient` for control-flow tests.
+## Extending
 
-## Layout conventions
+| To add | Do |
+| --- | --- |
+| A builtin tool | Subclass `BaseTool` in `tools/`, set `read_only`/`terminal`, add it to `tools/builtins.py` and a mode, test it with the fake sandbox and in Docker |
+| A reward component | `@register_reward("name")` factory in `rewards.py` (or anywhere, as a user) |
+| An exporter | `@register_exporter("name")` in `export/core.py` |
+| A model client | Implement `complete(messages, *, tools=None, tool_choice="auto", **kw) -> ModelResponse` |
+| A trainer integration | A module in `integrations/` that imports its framework lazily, plus an entry in `integrations/__init__.py` (`agentbox integrations` lists it) |
+| A CLI command | A Typer command in `cli/`, then regenerate the reference docs |
 
-- Package under `src/agentbox/`  
-- Public re-exports in `agentbox/__init__.py` stay small  
-- New export formats → `trajectory/formats/`  
-- New tools → `tools/` + registry, not hard-coded in the loop  
-- Docs: one concern per file under `docs/` (this tree)  
+Every config field needs a `Field(description=...)`: the reference docs and
+`agentbox config show` are generated from them.
 
-## Extension checklist
+## Commits and releases
 
-### New builtin tool
-
-1. Implement `BaseTool` in `tools/`  
-2. Register in `tools/builtins.default_tools`  
-3. Add unit tests (schema + behavior with fake sandbox)  
-4. Document in [Tools](tools.md)  
-
-### New custom tool (user code)
-
-No core changes — use `@tool` / `BaseTool` and `Agent(custom_tools=[...])`.
-
-### New model backend
-
-Implement `ModelClient` with OpenAI-shaped `complete`. Prefer wrapping
-`AsyncOpenAI` unless the protocol truly differs.
-
-### New trajectory format
-
-Add `trajectory/formats/foo.py` and re-export if public.
-
-## Commits
-
-This repository uses **Conventional Commits** (`feat:`, `fix:`, `docs:`,
-`test:`, `chore:`, …) with optional scopes (`sandbox`, `tools`, `agent`, …).
-
-## Packaging
-
-- Build backend: hatchling  
-- `requires-python >= 3.11`  
-- License: Apache-2.0  
-
-```bash
-uv build
-```
-
-## Docs maintenance
-
-- No “phase” or “roadmap” language in user-facing docs  
-- Link rather than copy large examples  
-- Keep [docs/index.md](index.md) map updated when adding files  
-
-## Related
-
-- [Architecture](architecture.md)  
-- [Setup](setup.md)  
+- [Conventional Commits](https://www.conventionalcommits.org/) with scopes
+  (`sandbox`, `agent`, `tools`, `model`, `runner`, `tasks`, `rewards`,
+  `integrations`, `cli`, `bench`, `generate`, `server`, `docs`, `ci`).
+  Breaking changes use `!` and a `BREAKING CHANGE:` footer.
+- The version lives in `src/agentbox/version.py`; the build backend is
+  hatchling. Update `CHANGELOG.md`, then `uv build` and `twine check --strict dist/*`.

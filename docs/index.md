@@ -1,99 +1,69 @@
-# AgentBox — Technical Documentation
+# AgentBox documentation
 
-Maintainer- and user-focused reference for **AgentBox**: a fully local framework
-for running LLM agents inside isolated Docker sandboxes and collecting multi-turn
-trajectories for offline datasets and online RL (ART / GRPO-style pipelines).
-
-This tree follows **Separation of Concerns (SoC)**: one topic per document.
-Cross-links replace duplication. The package is the source of truth for APIs;
-these docs describe contracts, data flow, and operational practice.
-
-## Runtime shape
-
-```txt
-CLI / Python API
-  -> Task (schema + optional generator)
-  -> SandboxManager.create (Docker container)
-  -> TaskSeeder (starter_files + setup_commands)
-  -> AgentLoop + ToolExecutor (OpenAI tools)
-  -> Verifier (pytest / command)
-  -> Trajectory (JSON / ART dict / JSONL)
-  -> optional ParallelRunner / metrics / prune
-```
-
-Control plane (prompts, models, trajectories) stays on the host. Execution plane
-(file I/O, shell, tests) always runs **inside** the container.
+AgentBox runs LLM agents in isolated Docker sandboxes and turns each episode
+into a reward and a training-ready trajectory. It is **trainer-agnostic**: the
+trainer (TRL, verl, OpenRLHF, SkyRL, ART or your own loop) owns generation and
+optimisation, and AgentBox owns sandboxes, tools, verification, rewards and
+trajectory data.
 
 ## Start here
 
-| Goal | Document |
+| I want to... | Read |
 | --- | --- |
-| Install, first mock rollout, Docker checks | **[Setup](setup.md)** |
-| Module boundaries and invariants | [Architecture](architecture.md) |
-| How to run from the terminal | [CLI](cli.md) |
-| Single / parallel rollouts | [Runner](runner.md) |
-| Config models and defaults | [Configuration](configuration.md) |
+| Install, run my first rollouts, see the outputs | [Quick start](quickstart.md) |
+| Train a model with TRL / verl / OpenRLHF / SkyRL / ART | [Training](training.md) and the [integration guides](#integrations) |
+| Write tasks and verifiers that cannot be gamed | [Tasks](tasks.md), [Rewards](rewards.md) |
+| Configure models, sandboxes and the agent | [Configuration](configuration.md) ([full reference](config-reference.md)) |
+| Use the command line | [CLI guide](cli.md) ([full reference](cli-reference.md)) |
+| Make runs fast and memory-flat | [Performance](performance.md) |
+| Upgrade from 0.2 | [Migration](migration.md) |
 
-## Documentation map
+## Guides
 
-| Document | Concern |
+| Page | Covers |
 | --- | --- |
-| [Setup](setup.md) | Install, Docker, images, first runs, verification |
-| [Architecture](architecture.md) | Package layout, control vs execution, data flow |
-| [Configuration](configuration.md) | `SandboxConfig`, `ModelConfig`, `AgentConfig`, `RolloutConfig` |
-| [Sandbox](sandbox.md) | Container lifecycle, path jail, resources, prune, snapshots |
-| [Tools](tools.md) | Builtins, custom tools, registry, executor |
-| [Models](models.md) | OpenAI-compatible client, providers, mock client |
-| [Agent](agent.md) | Agent facade, loop, prompts, timeouts |
-| [Tasks](tasks.md) | Task schema, seeder, verifier, filters, bulk I/O, rewards |
-| [Task Generation](generation.md) | Automated generation, batch, two-stage, DSPy, static/Docker/LLM QC |
-| [Trajectories](trajectories.md) | Message format, recorder, JSON / ART / JSONL, HTML render |
-| [Runner](runner.md) | `Rollout.run`, `ParallelRunner`, GRPO-style groups |
-| [Metrics](metrics.md) | Aggregate success rate, steps, per-task stats |
-| [CLI](cli.md) | Typer commands: generate, bench, traj, doctor, … |
-| [ART / GRPO](art_grpo.md) | Offline groups, online sketch, hybrid rewards |
-| [Security](security.md) | Isolation model, network, path jail, residual risk |
-| [Benchmarks](benchmarks.md) | Frozen real-rollout suites, multi-model reports, setup checks |
-| [Development](development.md) | Tests, packaging, extension checklist |
+| [Quick start](quickstart.md) | Install, `doctor`, `init`, mock and real-model runs, inspecting and exporting |
+| [Architecture](architecture.md) | Layers, data flow, concurrency model, invariants |
+| [Configuration](configuration.md) | `agentbox.yaml`, profiles, `${VAR}` interpolation, Python config objects |
+| [Sandbox](sandbox.md) | Images, limits, security, caches, warm pool, lifecycle, interactive sandboxes |
+| [Tasks](tasks.md) | Task schema, verifiers, tamper protection, per-task environments, datasets, authoring |
+| [Rewards](rewards.md) | Reward modes, composable components, LLM judges, custom rewards, failure kinds |
+| [Agent](agent.md) | The loop, stop reasons, tool protocols (native / Hermes), hooks, prompts |
+| [Tools](tools.md) | Builtin tools and modes, custom tools with `@tool`, truncation, timeouts |
+| [Models](models.md) | OpenAI-compatible endpoints, retries, reasoning, sampling, token capture, TITO |
+| [Runner](runner.md) | `Rollout`, `ParallelRunner`, groups, retries, resume, sinks |
+| [Trajectories](trajectories.md) | Schema v2, storage, metrics, trajectory tooling, exporters |
+| [Training](training.md) | Environment API, choosing an integration, exact token data, RL utilities |
+| [Server](server.md) | `agentbox serve` HTTP environments and the `RemoteEnv` client |
+| [Benchmarks](benchmarks.md) | Frozen suites, pass@k, paired comparisons, CI gating |
+| [Task generation](generation.md) | Teacher-generated tasks with static, Docker and LLM QC |
+| [Performance](performance.md) | Memory and latency design, knobs, measurements |
+| [Security](security.md) | Threat model, isolation defaults, reward-hacking defences |
+| [Development](development.md) | Tests, CI, docs generation, releasing, extending |
 
-## Core guarantees
+### Integrations
 
-- **Container per rollout**: each episode gets a fresh Docker container by default.
-- **Tools execute in-container only**: host filesystem is not the agent workspace.
-- **OpenAI wire format only**: Chat Completions + tool calling for model I/O.
-- **Provider-agnostic models**: any OpenAI-compatible `base_url` (local or remote).
-- **Seed before agent**: files and `setup_commands` complete before the loop starts.
-- **Verifier owns reward**: objective exit codes (optionally shaped by step costs).
-- **Trajectory export is self-contained**: offline ART-shaped dicts without requiring ART installed.
+[TRL](integrations/trl.md) · [verl](integrations/verl.md) ·
+[OpenRLHF](integrations/openrlhf.md) · [SkyRL](integrations/skyrl.md) ·
+[ART](integrations/art.md)
 
-## Public Python surface
+### Reference
 
-Primary imports from `agentbox`:
+[CLI reference](cli-reference.md) and [configuration reference](config-reference.md)
+are generated from the code (`python scripts/gen_reference_docs.py`).
 
-```python
-from agentbox import (
-    Agent,
-    Task,
-    Rollout,
-    ParallelRunner,
-    Trajectory,
-    SandboxManager,
-    BaseTool,
-    tool,
-    aggregate_trajectories,
-)
-```
+## Guarantees
 
-Optional:
-
-```python
-from agentbox.tasks.generate import TaskGenerator, GenerateConfig
-from agentbox.sandbox import prune_agentbox_containers, commit_sandbox
-from agentbox.sandbox.images import sandbox_config_for_preset
-```
-
-## Related
-
-- [README](../README.md) — project overview and quick start
-- OpenPipe ART — GRPO training consumer of exported trajectories
-- Examples under [`examples/`](../examples/)
+- **Fresh sandbox per rollout.** Containers are never reused across episodes;
+  warm-pool containers are handed out once.
+- **Tools act only inside the sandbox.** Paths are jailed to the workspace, and
+  the host filesystem is never the agent's workspace.
+- **The verifier owns the reward.** It runs after the agent, with protected and
+  hidden files restored or written first.
+- **Infrastructure failures are labelled, not scored.** `failure_kind` tells
+  policy failures (train on them) from sandbox, seed, model-API and verifier
+  failures (retry and drop them).
+- **Trajectories are self-contained.** One JSON object per rollout holds the
+  messages, tool records, verifier result, reward breakdown and token data.
+- **No conversation is left dangling.** Every assistant tool call gets a tool
+  response, even on timeouts and errors.

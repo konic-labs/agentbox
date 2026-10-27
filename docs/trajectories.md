@@ -1,151 +1,103 @@
 # Trajectories
 
-Trajectories are the primary artifact of AgentBox: full multi-turn histories
-with tools, metrics, reward, and export helpers.
+Every rollout, whether produced by the CLI, `Rollout`, `ParallelRunner`,
+`AgentBoxEnv` or a trainer adapter, is recorded as one self-contained
+`Trajectory` (schema version 2).
 
-## Native schema
+## Schema
 
-```python
-class Trajectory:
-    task_id: str
-    run_id: str
-    messages: list[Message]
-    tool_call_records: list[ToolCallRecord]
-    reward: float
-    final_status: FinalStatus   # success|failed|timeout|error|max_steps
-    metrics: TrajectoryMetrics
-    metadata: dict
-    error: str | None
-    model: str | None
-    tool_mode: str | None
-    tools: list[dict] | None    # OpenAI tool schemas used
-    created_at / finished_at
-```
-
-### Message
-
-OpenAI-compatible roles: `system`, `user`, `assistant`, `tool`.
-
-Assistant tool calls use nested `ToolCall` / `FunctionCall` with JSON-string
-`arguments`. Tool messages carry `tool_call_id` and `content`.
-
-`Message.to_openai_dict()` produces Chat Completions message objects.
-
-### TrajectoryMetrics
-
-Includes `steps`, `tool_calls`, `model_calls`, token counts (if available),
-`duration_s`, `sandbox_create_s`, `seed_s`, `verify_s`.
-
-## Official verifier vs agent self-tests
-
-Scoring uses the **task verifier** after the agent stops — not mid-rollout
-`run_tests` / ad-hoc `python -c` checks. `Rollout` stores ground-truth fields
-on `traj.metadata`:
-
-| Key | Meaning |
+| Field | Content |
 | --- | --- |
-| `verify_command` | Official command run in the sandbox |
-| `verify_exit_code` | Process exit code |
-| `verify_success` | Bool: exit matches `success_exit_code` |
-| `verify_stdout` / `verify_stderr` | Truncated capture (for dashboards/debug) |
-| `verify_duration_s` | Verifier wall time |
+| `task_id`, `task_hash` | The task and a hash of its exact revision |
+| `run_id`, `rollout_id` | Experiment id and unique rollout id |
+| `group_id`, `sample_index` | GRPO group membership (`<task_id>@<run>`, 0..n-1) |
+| `messages` | System, user, assistant (tool calls, reasoning, `finish_reason`, `usage`, `latency_s`, `tokens`) and tool messages |
+| `tool_call_records` | Per call: name, arguments, result preview, `is_error`, `duration_s`, `truncated`, step |
+| `reward`, `reward_breakdown` | Total reward and its components ([rewards](rewards.md)) |
+| `final_status` | `success`, `failed`, `timeout`, `max_steps`, `error` |
+| `stop_reason` | `final_answer`, `submitted`, `max_steps`, `timeout`, `context_length`, `error` |
+| `failure_kind` | `none`, `policy`, or an infrastructure kind ([rewards](rewards.md#infrastructure-failures-are-not-rewards)) |
+| `verify` | Verifier result: `success`, `reward`, `exit_code`, `command`, `stdout`/`stderr` (head + tail), `tests_passed/failed/total`, `tampered`, `timed_out`, `duration_s` |
+| `metrics` | `steps`, `tool_calls`, `tool_errors`, `model_calls`, token usage, `duration_s`, `sandbox_create_s`, `seed_s`, `verify_s`, `model_latency_s`, `tool_latency_s`, `attempts`, `salvaged_tool_calls` |
+| `model`, `tool_mode`, `tools` | The policy id and the tool schemas it saw |
+| `metadata` | Task metadata, `split`, `group_key`, `submitted_answer`, `kept_sandbox`, ... |
+| `error`, `created_at`, `finished_at` | |
 
-Agents may print “All tests passed!” on a different path or invented file while
-`verify_success` is still `false` (wrong module name, parallel test file, etc.).
+Helpers: `traj.success`, `traj.is_trainable`, `traj.token_trace()`,
+`traj.to_json()`, `traj.save(path)` (atomic) and `Trajectory.load(path)`.
+Version-1 files are upgraded on load.
 
-## HTML dashboard
+## Storage
+
+```python
+from agentbox import JsonlSink, iter_trajectories
+from agentbox.trajectory.io import write_jsonl
+
+for t in iter_trajectories("runs/a"):              # file, .jsonl(.gz), dir, or bench run dir
+    ...
+write_jsonl(trajectories, "subset.jsonl.gz")
+```
+
+JSONL (optionally gzip) is the default store. It is appendable, streamable and
+resumable. One-file-per-trajectory directories (`DirectorySink`) suit
+benchmark reports. Readers are lazy, so files larger than memory are fine.
+
+## Tooling
 
 ```bash
-agentbox traj show path/to/traj.json
-agentbox traj render bench-results/run1 -o traj-dash.html
-agentbox traj render bench-results/run1 --model-id my-model -o out.html
+agentbox traj stats runs/a                       # metrics, tool usage, failure kinds, GRPO group stats
+agentbox traj show runs/a/trajectories.jsonl     # one rollout in detail
+agentbox traj validate runs/a                    # schema + conversation validity (dangling calls, unknown ids, order)
+agentbox traj filter runs/a -o hard.jsonl --max-reward 0 --trainable-only
+agentbox traj filter runs/a -o uses_patch.jsonl --tool apply_patch --grep "Traceback"
+agentbox traj diff a.json b.json                 # outcome, tool sequence, first divergence
+agentbox traj replay t.json --task tasks/x       # re-execute the recorded tool calls, compare the reward
+agentbox traj render runs/a -o dash.html         # self-contained HTML dashboard
 ```
 
-Library: `agentbox.trajectory.render.render_html(trajs, out_path)`. Pure HTML+CSS
-with official-verifier panel, agent self-check panel, and mismatch banner when
-they disagree.
+`traj stats` includes group statistics for GRPO data: the number of groups,
+the fractions that are all-solved, all-failed and mixed, the zero-variance
+fraction, and the mean in-group reward std. Zero-variance groups carry no
+GRPO signal.
 
-## Recording
+`traj replay` is a determinism and reward-stability check. It runs the same
+actions in a fresh sandbox and reports whether the verifier agrees.
 
-`TrajectoryRecorder` is used by `Rollout` to accumulate messages, tool records,
-and metrics, then `finalize(reward, final_status, ...)`.
-
-## Persistence
+## Metrics
 
 ```python
-traj.save("trajectories/run.json")
-traj = Trajectory.load("trajectories/run.json")
+from agentbox import MetricsAccumulator, aggregate_trajectories
+
+acc = MetricsAccumulator()
+for t in iter_trajectories("runs/a"):
+    acc.add(t)                      # O(1) memory per trajectory
+m = acc.result()
+print(m.success_rate, m.mean_reward, m.reward_std, m.p90_duration_s, m.infra_failures,
+      m.by_failure_kind, m.tool_error_rate, m.salvaged_tool_calls)
 ```
 
-JSON is Pydantic `model_dump_json`.
-
-### JSONL datasets
-
-```python
-from agentbox.trajectory.formats import export_jsonl
-export_jsonl(trajs, "dataset.jsonl")
-```
-
-One Trajectory JSON object per line.
-
-## ART export
-
-Offline dict matching OpenPipe ART’s conceptual shape:
-
-```python
-art = traj.to_art_dict()
-# {
-#   "messages_and_choices": [... OpenAI message dicts ...],
-#   "tools": [...],
-#   "reward": 1.0,
-#   "metrics": {"duration", "steps", "tool_calls", "correct", ...},
-#   "metadata": {"task_id", "run_id", "final_status", ...}
-# }
-```
-
-Rules:
-
-- Message dicts only (portable; no live `Choice` objects required)  
-- `metrics["correct"]` is `1.0` iff `final_status == success`  
-- Tool turns preserve OpenAI `tool_calls` / `tool` roles  
-
-Live object (optional extra):
+## Exporters
 
 ```bash
-uv pip install -e ".[art]"
+agentbox traj export runs/a -f FORMAT -o out.jsonl [--successful-only] [--min-reward X] [--include-infra]
 ```
 
 ```python
-art_traj = traj.to_art()  # art.Trajectory
+from agentbox import ExportFilter, export
+
+stats = export(iter_trajectories("runs/a"), "grpo", "grpo.jsonl",
+               filter=ExportFilter(min_reward=None), drop_zero_variance=True, advantage="rloo")
 ```
 
-### GRPO groups
+| Format | One row per | Content | Typical consumer |
+| --- | --- | --- | --- |
+| `chat` | trajectory | `{"messages", "tools", ...}` OpenAI chat format | SFT (TRL `SFTTrainer`, axolotl) |
+| `sharegpt` | trajectory | `{"conversations": [{"from", "value"}], "tools"}` | ShareGPT-style SFT tooling |
+| `dpo` | group | `{"prompt", "chosen", "rejected"}`: best vs worst sample, if the margin is at least `--min-margin` | TRL `DPOTrainer` |
+| `grpo` | group | `rewards`, `advantages` (`--advantage grpo\|drgrpo\|rloo`) and samples; `--drop-zero-variance` | offline GRPO and analysis |
+| `tokens` | token sequence (`--per-turn`: per turn) | `prompt_ids`, `response_ids`, `response_mask`, `response_logprobs`, `exact` | custom trainers, verl/OpenRLHF-style pipelines |
+| `hf` | trajectory | Parquet via `datasets`; `--push-to-hub REPO` | the HF Hub |
+| `art` | trajectory | ART `Trajectory` dicts; Choices with token ids when captured | OpenPipe ART ([guide](integrations/art.md)) |
 
-Grouping is the caller’s job (or `ParallelRunner.run_groups`):
-
-```python
-groups = await runner.run_groups(tasks, group_size=4)
-art_groups = [[t.to_art_dict() for t in g] for g in groups]
-```
-
-Example: `examples/art_integration.py`.
-
-## Final status mapping (rollout)
-
-| Situation | Typical `final_status` |
-| --- | --- |
-| Verifier success | `success` |
-| Verifier fail, normal stop | `failed` |
-| Episode/step timeout | `timeout` |
-| Max steps then fail verify | `max_steps` |
-| Seed / infra failure | `error` |
-
-Reward is still taken from the verifier (and optional shaping) when verification
-runs.
-
-## CLI export
-
-```bash
-agentbox export traj.json --format art -o traj.art.json
-agentbox export traj.json --format jsonl -o traj.jsonl
-```
+Every exporter drops infrastructure failures unless `--include-infra` is given.
+Register your own with `agentbox.export.register_exporter("name")`.

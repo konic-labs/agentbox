@@ -1,187 +1,142 @@
 # Models
 
-AgentBox speaks **OpenAI Chat Completions + tool calling only**. Any compatible
-server works: cloud providers, vLLM, SGLang, Ollama, LocalAI, llama.cpp server.
+The policy is any **OpenAI Chat Completions** endpoint with tool calling (vLLM,
+SGLang, TGI, Ollama, OpenAI, OpenRouter, Together, Featherless, ...), or any
+object implementing the small `ModelClient` interface: TITO, mock and replay
+clients, or your own.
 
-## Clients
-
-| Class | Use |
-| --- | --- |
-| `OpenAICompatClient` | Production path via official `openai.AsyncOpenAI` |
-| `MockModelClient` | Scripted responses for tests / hermetic demos |
-
-Protocol: `ModelClient.complete(messages, *, tools, tool_choice, **kwargs) -> ModelResponse`.
-
-## Configuration
+## Endpoints
 
 ```python
-from agentbox.config import ModelConfig
-from agentbox.model import OpenAICompatClient
+from agentbox import ModelConfig
 
-client = OpenAICompatClient(ModelConfig(
-    model="glm-5.2",
-    base_url="https://api.featherless.ai/v1",
-    api_key="...",
-    temperature=0.7,
-    max_tokens=4096,
-    timeout_s=120,
-    extra_body={},  # provider-specific
-))
-```
-
-Via `Agent`:
-
-```python
-from agentbox import Agent
-
-agent = Agent(
-    model="Qwen/Qwen2.5-7B-Instruct",
+ModelConfig(
+    model="qwen3-1.7b",
     base_url="http://localhost:8000/v1",
-    api_key="EMPTY",  # optional for many local servers
+    api_key_env="VLLM_API_KEY",            # or api_key=...; never recorded
+    temperature=1.0, top_p=1.0, max_tokens=2048,
+    top_k=20, min_p=0.0,                   # vLLM/SGLang samplers (sent in extra_body)
+    seed=None, stop=None,
+    extra_body={"chat_template_kwargs": {"enable_thinking": False}},
 )
 ```
 
-## Provider matrix
+All fields are listed in the [configuration reference](config-reference.md#modelconfig).
+`max_tokens_param: max_completion_tokens` is needed by OpenAI reasoning models.
+`tool_choice` and `parallel_tool_calls` are forwarded as request fields.
 
-| Type | Examples | Config |
-| --- | --- | --- |
-| External | Featherless, OpenRouter, Together, Fireworks, OpenAI | `base_url` + `api_key` |
-| Local | vLLM, SGLang, Ollama (`/v1`), LocalAI | `base_url`; `api_key` often unused |
-
-### Examples
-
-```python
-# Ollama
-Agent(model="qwen2.5-coder:7b", base_url="http://localhost:11434/v1", api_key="ollama")
-
-# vLLM (must enable tool calling — see matrix below)
-Agent(model="Qwen/Qwen2.5-7B-Instruct", base_url="http://localhost:8000/v1")
-
-# Featherless
-Agent(model="glm-5.2", base_url="https://api.featherless.ai/v1", api_key="...")
-```
-
-## Tool calling (required for agent rollouts)
-
-AgentBox agents always send OpenAI **tools** with `tool_choice="auto"`.  
-Endpoints that reject that return `final_status=error` with **0 steps**.
-
-| Server | Typical requirement |
-| --- | --- |
-| **vLLM** | `--enable-auto-tool-choice` and `--tool-call-parser <parser>` (e.g. `hermes`, `qwen3_coder`) |
-| **Ollama** | Model with tools capability (e.g. recent Qwen chat models) |
-| **Cloud OpenAI-compat** | Provider must support function/tool calling |
-
-Probe before a long bench:
+Probe an endpoint before a long run:
 
 ```bash
-agentbox doctor \
-  --model /data/models/unsloth/Qwen3.6-27B-NVFP4 \
-  --base-url http://localhost:8000/v1 \
-  --api-key EMPTY
+agentbox doctor --model qwen3-1.7b --base-url http://localhost:8000/v1   # chat + tool calling
+agentbox bench run SUITE --model ... --probe                            # probe each model first
 ```
 
-Python:
+### Serving open models with tool calling
+
+```bash
+vllm serve Qwen/Qwen3-1.7B --enable-auto-tool-choice --tool-call-parser hermes
+python -m sglang.launch_server --model-path Qwen/Qwen3-1.7B --tool-call-parser qwen25
+```
+
+Without a tool-call parser, use `agent.tool_protocol: hermes` (AgentBox renders
+and parses tool calls itself) or TITO.
+
+## Retries and errors
+
+- The OpenAI SDK's own retries are disabled. AgentBox retries **429, 5xx,
+  timeouts and connection errors** up to `max_retries` times, with exponential
+  backoff and full jitter (`retry_backoff_s`, `retry_max_backoff_s`) and
+  honouring `Retry-After`. Other 4xx errors (bad requests, auth) fail at once.
+- Context overflows raise `ContextLengthError`. With `adaptive_max_tokens`, a
+  request whose `max_tokens` does not fit is first retried with the room left.
+  The loop then ends the episode as `context_length`, a policy failure.
+- Errors that remain after retries end the rollout with
+  `failure_kind=model_api` (infrastructure), which the runner retries as a
+  whole rollout.
+- Clients are reused across rollouts and closed by whoever created them; the
+  runner owns the clients it builds from a `ModelConfig`.
+
+## Reasoning
+
+`reasoning_content` / `reasoning` fields and inline `<think>` blocks
+(`strip_think: true`) are recorded on assistant messages. Whether reasoning is
+sent back on later turns is `AgentConfig.send_reasoning` ([agent](agent.md#reasoning-models)).
+
+## Token capture
+
+RL trainers need the exact tokens that were sampled and their logprobs, not a
+re-tokenisation of the text.
+
+```yaml
+models:
+  local:
+    model: qwen3-1.7b
+    base_url: http://localhost:8000/v1
+    capture_tokens: true        # vLLM: extra_body.return_token_ids -> prompt + completion token ids
+    capture_logprobs: true      # logprobs=true (top_logprobs: k for alternatives)
+```
+
+Each assistant message then carries `tokens: TurnTokens`:
+
+| Field | Meaning |
+| --- | --- |
+| `completion_ids` | Sampled token ids |
+| `logprobs` | Sampler logprob per completion token |
+| `prompt_reuse` | Leading prompt tokens shared with the previous turn's prompt + completion |
+| `prompt_ids` | The rest of the prompt (only this suffix is stored) |
+| `prefix_break` | The prompt did not start with the previous sequence (see below) |
+
+Storing the shared prefix once keeps multi-turn token data 3–5x smaller than
+per-turn prompts. `Trajectory.token_trace()` rebuilds training sequences
+(`prompt_ids`, `response_ids`, `response_mask`, `response_logprobs`), where
+tool-result tokens are masked out. `agentbox traj export -f tokens` writes them
+for trainers.
+
+### Prefix breaks and TITO
+
+Chat-completions servers **re-render the whole conversation** every turn. The
+template re-serialises tool-call JSON and drops earlier `<think>` blocks, so the
+tokens the model generated are usually *not* a prefix of the next prompt. Each
+break starts a new training sequence, and recomputed prompts drift from what
+was sampled. With Qwen3 on vLLM, almost every turn breaks.
+
+**TITO (token-in/token-out)** avoids this. AgentBox renders the initial prompt
+once with the model's chat template, generates from token ids through
+`/v1/completions`, and appends each tool result as delta tokens. History is
+never re-rendered, so every trajectory is **one** prefix-consistent sequence.
+
+```bash
+# the profile's model/base_url name the vLLM server; --tito names the HF tokenizer
+agentbox run tasks --tito Qwen/Qwen3-1.7B -n 8 --out runs/tito
+```
 
 ```python
-from agentbox.config import ModelConfig
-from agentbox.model.probe import probe_endpoint
+from agentbox.tito import ChatTokenizer, CompletionsGenerator, TitoModelClient
 
-results = await probe_endpoint(ModelConfig(
-    model="…", base_url="http://localhost:8000/v1", api_key="EMPTY"
-))
-assert all(r.ok for r in results)
+tok = ChatTokenizer.from_pretrained("Qwen/Qwen3-1.7B", chat_template_kwargs={"enable_thinking": False})
+gen = CompletionsGenerator(model="qwen3-1.7b", base_url="http://localhost:8000/v1")
+client = TitoModelClient(tok, gen, model="qwen3-1.7b", max_tokens=1024, temperature=1.0,
+                         max_context_tokens=16384)
+traj = await Rollout.run(task, model=client)
+assert len(traj.token_trace().sequences) == 1
+await client.aclose()
 ```
 
-## Request / response shape
+TITO needs `transformers` (`pip install "agentbox-rl[hf]"`). It parses
+`<tool_call>` blocks with AgentBox's lenient parser. The OpenRLHF adapter runs
+TITO on OpenRLHF's own vLLM engine. Measured on Qwen3-1.7B: 10-turn episodes
+gave 1 sequence and 0 breaks with TITO, against a break on nearly every turn
+with chat completions.
 
-Request (conceptual):
+## Other clients
 
-```json
-{
-  "model": "glm-5.2",
-  "messages": [ ... ],
-  "tools": [ ... ],
-  "tool_choice": "auto",
-  "temperature": 0.7
-}
-```
+| Client | Use |
+| --- | --- |
+| `MockModelClient([...ModelResponse])` | Scripted turns; a shared instance replays the script per conversation (deterministic under concurrency) |
+| `FunctionModelClient(async_fn)` | `async_fn(messages, tools) -> ModelResponse`: write a policy in Python |
+| `ReplayModelClient(trajectory)` | Replays the assistant turns of a recorded trajectory (`agentbox traj replay`) |
+| `agentbox run --mock` | No-op policy for pipeline checks |
 
-Assistant tool call:
-
-```json
-{
-  "role": "assistant",
-  "tool_calls": [
-    {
-      "id": "call_abc",
-      "type": "function",
-      "function": {
-        "name": "read_file",
-        "arguments": "{\"path\": \"main.py\"}"
-      }
-    }
-  ]
-}
-```
-
-Tool result:
-
-```json
-{
-  "role": "tool",
-  "tool_call_id": "call_abc",
-  "content": "..."
-}
-```
-
-## ModelResponse fields
-
-- `content`, `tool_calls`, `finish_reason`
-- `reasoning_content` (if provider exposes it)
-- `usage` token counts
-- `raw_choice` serialized provider choice
-
-## Errors
-
-`ModelError` wraps API failures. Tool-calling related 400s attempt clearer
-messages when the body mentions tools/functions.
-
-## ART / existing AsyncOpenAI
-
-```python
-client = OpenAICompatClient.from_async_openai(
-    existing_async_openai_client,
-    model=model_name,
-)
-```
-
-Useful when integrating with OpenPipe ART’s `TrainableModel.openai_client()`.
-
-## Mock client
-
-```python
-from agentbox.model import MockModelClient, ModelResponse
-from agentbox.trajectory.schema import ToolCall, FunctionCall
-
-mock = MockModelClient([
-    ModelResponse(
-        content=None,
-        tool_calls=[ToolCall(id="c1", function=FunctionCall(
-            name="list_files", arguments="{}"
-        ))],
-    ),
-    ModelResponse(content="done", tool_calls=[]),
-])
-```
-
-Each `complete` call consumes the next scripted response. Use a **fresh** mock
-per parallel rollout (stateful index).
-
-## Non-goals
-
-- Claude Messages API adapters  
-- Raw XML / ReAct string parsers  
-- Built-in training / weight updates  
-
-Those remain outside AgentBox; export trajectories instead.
+Any object with `async complete(messages, *, tools=None, tool_choice="auto", **kwargs)
+-> ModelResponse` and a `model` attribute works as a model client.
