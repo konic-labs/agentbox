@@ -27,6 +27,8 @@ about 100K tokens.
 
 ### Results
 
+<img src="../assets/readme/training.svg" width="100%" alt="Reward while training, in two 30-step GRPO runs of Qwen3-0.6B with verl on one L4 GPU. The 4-step mean of the training reward rises from about 0.57 to 0.86, and validation on 9 held-out tasks from 0.70 to 0.89. Held-out success is 48.6% for the base model and 77.8% after 30 steps; the first run reached 83.3%.">
+
 The recipe was run twice for 30 steps. Run 2 used the script exactly as
 shipped, plus an extra checkpoint at step 15. The reward is the AgentBox
 verifier's. Training and validation numbers are verl's own metrics.

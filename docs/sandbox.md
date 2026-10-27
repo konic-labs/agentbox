@@ -4,6 +4,8 @@ Every rollout runs in its own Docker container, created from a
 `SandboxConfig`, seeded with the task's files, and removed afterwards.
 Containers are never reused across rollouts.
 
+<img src="assets/readme/rollout.svg" width="100%" alt="One rollout. A fresh container is created and seeded. The agent reads calc.py; its read of ../../etc/passwd is refused with path escapes workspace; it runs the tests, writes the fix and runs them again. The verifier runs python -m pytest -q and exits 0, reward 1.0. The sandbox is destroyed, and its trajectory remains as a red line.">
+
 ## Images
 
 | Preset | Image |
