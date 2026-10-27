@@ -89,6 +89,12 @@ group_stats(groups)    # frac_all_solved / frac_all_failed / frac_mixed / frac_z
 pass_at_k(n=8, c=3, k=1)                                 # unbiased estimator (Chen et al., 2021)
 ```
 
+`grpo` divides by the population standard deviation (over `n`). TRL, verl and
+OpenRLHF divide by the sample standard deviation (over `n - 1`), so their
+advantages are smaller by a factor of `sqrt(n / (n - 1))`, about 1.07 for a
+group of eight. For rewards `[1, 0, 1, 1]`, AgentBox gives `+0.58` and `-1.73`,
+and verl gives `+0.5` and `-1.5`. Signs and ranking are the same.
+
 Two practical consequences for GRPO-style training:
 
 - **Drop zero-variance groups.** A group whose samples all got the same reward
