@@ -37,9 +37,9 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any, TypeVar
 
+import docker
 from docker.errors import APIError, DockerException, ImageNotFound, NotFound
 
-import docker
 from agentbox.errors import DockerNotAvailableError, ImageNotFoundError, SandboxError
 from agentbox.sandbox.types import ExecResult, ImageProfile
 
