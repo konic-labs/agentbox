@@ -148,3 +148,18 @@ def test_bench_compare_statistics(tmp_path: Path) -> None:
     assert r.exit_code == 1
     paired = json.loads(r.stdout)["deltas"][0]["paired"]
     assert paired["losses"] == 8 and paired["sign_test_p"] < 0.01
+
+
+def test_reward_flag_parsing() -> None:
+    from agentbox.cli.run import _reward_specs
+
+    specs = _reward_specs(
+        ["verifier", "step_penalty:0.5,per_step=0.02", "pkg.mod:fn", "pkg.mod:fn:2,flag=true"]
+    )
+    assert [(s.name, s.weight) for s in specs] == [
+        ("verifier", 1.0),
+        ("step_penalty", 0.5),
+        ("pkg.mod:fn", 1.0),
+        ("pkg.mod:fn", 2.0),
+    ]
+    assert specs[1].params == {"per_step": 0.02} and specs[3].params == {"flag": True}
