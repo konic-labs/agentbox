@@ -97,6 +97,8 @@ def _fonts_cached() -> bool:
 def test_every_piece_draws_a_small_valid_svg(tmp_path: Path) -> None:
     pytest.importorskip("fontTools")
     art.write_all(str(tmp_path), None, art.TRAINING_DATA)
+    preview = ET.fromstring(art.og(art.Type(art.ensure_fonts())))
+    assert preview.get("viewBox") == "0 0 1280 640"  # GitHub's social preview size
     for name in art.OUTPUTS:
         body = (tmp_path / name).read_text()
         root = ET.fromstring(body)
