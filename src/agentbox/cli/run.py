@@ -292,6 +292,12 @@ def run(
         )
         if m.by_failure_kind:
             typer.echo(f"failure kinds: {m.by_failure_kind}")
+        if m.salvaged_tool_calls:
+            typer.secho(
+                f"{m.salvaged_tool_calls} tool call(s) were recovered from message text: the "
+                "server's tool parser is failing; consider --tito or agent.tool_protocol=hermes",
+                fg=typer.colors.YELLOW,
+            )
         typer.echo(f"wall clock {time.monotonic() - t0:.1f}s")
 
     emit(

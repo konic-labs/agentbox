@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+# Tool name given to calls that could not be parsed; the executor answers them
+# with the parse error so the agent can retry with a well-formed call.
+INVALID_TOOL_CALL = "invalid_tool_call"
+
 
 class ToolMode(StrEnum):
     """How tools are selected for an agent rollout."""

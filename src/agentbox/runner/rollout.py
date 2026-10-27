@@ -167,6 +167,7 @@ def loop_metrics(metrics: TrajectoryMetrics, loop: AgentLoopResult) -> None:
     metrics.model_calls = loop.model_calls
     metrics.tool_calls = len(records)
     metrics.tool_errors = sum(1 for r in records if r.is_error)
+    metrics.salvaged_tool_calls = loop.salvaged_tool_calls
     metrics.prompt_tokens = usage.get("prompt_tokens")
     metrics.completion_tokens = usage.get("completion_tokens")
     metrics.total_tokens = usage.get("total_tokens")

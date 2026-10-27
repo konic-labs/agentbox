@@ -266,3 +266,39 @@ async def test_shared_mock_is_deterministic_across_concurrent_rollouts() -> None
     mock = MockModelClient([turn(call("w", "write_file", path="f", content="x")), done()])
     results = await asyncio.gather(*(run_loop(mock) for _ in range(4)))
     assert all(r.stop_reason == "final_answer" and r.steps == 1 for r in results)
+
+
+async def test_native_protocol_salvages_unparsed_tool_call_text() -> None:
+    seen: list[Any] = []
+
+    async def policy(messages: list[dict[str, Any]], tools: Any) -> ModelResponse:
+        seen.append(messages)
+        if len(seen) == 1:  # the server's tool parser gave up: the call is plain text
+            return ModelResponse(
+                content='Reading it.\n<tool_call>\n{"name": "read_file", "arguments": '
+                '{"path": "a.txt"}}\n</tool_call>'
+            )
+        return done()
+
+    result = await run_loop(FunctionModelClient(policy))
+    assert result.salvaged_tool_calls == 1 and result.stop_reason == "final_answer"
+    assert [m.content for m in result.messages if m.tool_call_id] == ["hello"]
+    replayed = seen[1][2]  # the assistant turn as sent back to the server
+    assert replayed["tool_calls"][0]["function"]["name"] == "read_file"
+    assert "<tool_call>" not in (replayed.get("content") or "")
+
+
+async def test_salvage_can_be_disabled_and_reports_malformed_calls() -> None:
+    text = '<tool_call>\n{"name": "read_file", "arguments": {"path": "a.txt"}}\n</tool_call>'
+    off = await run_loop([ModelResponse(content=text)], salvage_tool_calls=False)
+    assert off.stop_reason == "final_answer" and off.salvaged_tool_calls == 0
+    assert not [m for m in off.messages if m.tool_call_id]
+
+    broken = await run_loop([ModelResponse(content="<tool_call>\n{oops\n</tool_call>"), done()])
+    assert broken.salvaged_tool_calls == 1
+    rec = broken.tool_call_records[0]
+    assert rec.is_error and rec.name == "invalid_tool_call"
+    assert "malformed tool call" in rec.result
+    # the replayed call must stay valid JSON (native servers re-parse arguments)
+    call = next(m for m in broken.messages if m.tool_calls).tool_calls[0]
+    assert json.loads(call.function.arguments)["raw"].startswith("{oops")
