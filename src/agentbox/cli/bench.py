@@ -37,12 +37,39 @@ def bench_create(
     concurrency: Annotated[int, typer.Option("--concurrency")] = 8,
     n: Annotated[int, typer.Option("--n", help="Rollouts per task")] = 1,
     network: Annotated[bool, typer.Option("--network/--no-network")] = False,
+    tools: Annotated[
+        str | None,
+        typer.Option("--tools", help="Frozen tool mode or comma-separated tool names"),
+    ] = None,
+    max_steps: Annotated[int | None, typer.Option("--max-steps")] = None,
+    episode_timeout: Annotated[float | None, typer.Option("--episode-timeout")] = None,
 ) -> None:
-    """Create a suite pack from tasks and freeze its content hash."""
+    """Create a suite pack from tasks and freeze its content hash.
+
+    The frozen agent starts from the project's ``agent:`` section (without custom
+    tools or tool dropout); ``--tools`` / ``--max-steps`` / ``--episode-timeout`` win.
+    """
     from agentbox.benchmark.loader import create_suite_from_tasks
+    from agentbox.benchmark.schema import _default_bench_agent
     from agentbox.config import ResourceLimits, SandboxConfig
 
     st = state(ctx)
+    agent = (st.project.agent or _default_bench_agent()).model_copy(
+        update={"custom_tools": [], "drop_tools_prob": 0.0}
+    )
+    if tools:
+        from agentbox.types import ToolMode
+
+        modes = {m.value for m in ToolMode}
+        agent.tools = (
+            ToolMode(tools)
+            if tools in modes
+            else [t.strip() for t in tools.split(",") if t.strip()]
+        )
+    if max_steps is not None:
+        agent.max_steps = max_steps
+    if episode_timeout is not None:
+        agent.episode_timeout_s = episode_timeout
     base = st.project.sandbox or SandboxConfig()
     suite = create_suite_from_tasks(
         from_tasks,
@@ -58,6 +85,7 @@ def bench_create(
         )
         if base.limits
         else SandboxConfig(limits=ResourceLimits(network_disabled=not network)),
+        agent=agent,
         freeze=True,
     )
     m = suite.manifest
@@ -69,10 +97,13 @@ def bench_create(
             "tasks": len(suite.tasks),
             "hash": m.content_hash,
             "path": str(dest.resolve()),
+            "agent": {"tools": m.agent.tools, "max_steps": m.agent.max_steps},
         },
         lambda: typer.echo(
             f"created {m.suite_id} v{m.version} ({len(suite.tasks)} tasks) "
-            f"hash={m.content_hash} → {dest.resolve()}"
+            f"hash={m.content_hash} → {dest.resolve()}\n"
+            f"  agent: tools={m.agent.tools} max_steps={m.agent.max_steps} "
+            f"episode_timeout_s={m.agent.episode_timeout_s}"
         ),
     )
 

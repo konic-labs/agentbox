@@ -138,3 +138,30 @@ async def test_http_server_roundtrip() -> None:
         metrics = (await client.get("/metrics")).text
         assert "agentbox_sessions_created_total 1" in metrics
         await client.aclose()
+
+
+def test_bench_create_freezes_the_requested_agent(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from agentbox.benchmark.loader import load_suite
+    from agentbox.cli.main import app
+
+    tasks = (
+        Path(__file__).resolve().parents[2] / "examples" / "benchmarks" / "coding-mini" / "tasks"
+    )
+    args = ["bench", "create", str(tmp_path / "s"), "--from-tasks", str(tasks)]
+    args += [
+        "--suite-id",
+        "s",
+        "--name",
+        "s",
+        "--tools",
+        "read_file,write_file",
+        "--max-steps",
+        "6",
+    ]
+    r = CliRunner().invoke(app, args, catch_exceptions=False)
+    assert r.exit_code == 0, r.stdout
+    agent = load_suite(tmp_path / "s").manifest.agent
+    assert agent.tools == ["read_file", "write_file"] and agent.max_steps == 6
+    assert agent.drop_tools_prob == 0.0
