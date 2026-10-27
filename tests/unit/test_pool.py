@@ -191,3 +191,26 @@ def test_wait_is_bounded() -> None:
     t0 = time.monotonic()
     assert pool.acquire_sync(_spec(), size=1) is None
     assert 0.1 <= time.monotonic() - t0 < 2
+
+
+def test_orphan_selection_skips_kept_sandboxes() -> None:
+    import socket
+
+    from agentbox.sandbox.prune import select_containers
+
+    dead = {"agentbox": "1", "agentbox.owner": f"{socket.gethostname()}:999999999"}
+    containers = [
+        {"Id": "orphan", "Names": ["/agentbox-a-1"], "Labels": dead},
+        {"Id": "kept", "Names": ["/agentbox-b-1-kept"], "Labels": dead},
+        {
+            "Id": "elsewhere",
+            "Names": ["/agentbox-c-1"],
+            "Labels": {"agentbox.owner": "otherhost:1"},
+        },
+    ]
+    assert [c["Id"] for c in select_containers(containers)] == ["orphan"]
+    assert [c["Id"] for c in select_containers(containers, scope="all")] == [
+        "orphan",
+        "kept",
+        "elsewhere",
+    ]

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import socket
+import subprocess
 import time
 import uuid
 
@@ -12,7 +14,7 @@ from agentbox.config import ResourceLimits, SandboxConfig
 from agentbox.errors import PathEscapeError
 from agentbox.sandbox.backend import get_backend
 from agentbox.sandbox.manager import SandboxManager
-from agentbox.sandbox.prune import prune_agentbox_containers
+from agentbox.sandbox.prune import prune_agentbox_containers, reap_orphans
 
 pytestmark = pytest.mark.docker
 
@@ -179,6 +181,31 @@ async def test_security_defaults_and_labels(manager: SandboxManager, sandbox) ->
 async def test_prune_orphans_spares_live_sandboxes(sandbox) -> None:  # type: ignore[no-untyped-def]
     removed = prune_agentbox_containers(scope="orphans", dry_run=True)
     assert sandbox.id not in removed
+
+
+async def test_orphans_are_reaped_but_kept_and_live_sandboxes_survive(
+    manager: SandboxManager,
+) -> None:
+    child = subprocess.Popen(["true"])
+    child.wait()  # a pid that no longer exists stands in for a SIGKILLed trainer worker
+    dead_owner = {"agentbox.owner": f"{socket.gethostname()}:{child.pid}"}
+    orphan = await manager.create(task_id="orphan", run_id="reap", labels=dead_owner)
+    kept = await manager.create(task_id="kept", run_id="reap", labels=dead_owner)
+    manager.keep(kept)
+    live = await manager.create(task_id="live", run_id="reap")
+    try:
+        assert kept.name.endswith("-kept")
+        backend = manager.backend
+        assert reap_orphans(backend) >= 1
+        ids = {c["Id"] for c in backend.list_containers_sync()}
+        assert orphan.id not in ids  # dead owner: reaped
+        assert kept.id in ids and live.id in ids  # kept / live owner: untouched
+        # explicit orphan pruning also spares kept sandboxes; --all does not
+        assert kept.id not in prune_agentbox_containers(scope="orphans", dry_run=True)
+        assert kept.id in prune_agentbox_containers(scope="all", dry_run=True)
+    finally:
+        manager.backend.remove_container_sync(kept.id)
+        await manager.destroy(live)
 
 
 async def test_ensure_pytest_builds_cached_image_once() -> None:
