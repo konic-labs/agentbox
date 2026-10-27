@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Annotated, Any, Literal, cast
 
@@ -32,10 +33,12 @@ def _teacher(
     model = model or (t.model if t else None)
     if not model:
         fail("provide --model or set teacher.model in agentbox.yaml")
+    if api_key is None and t is not None:
+        api_key = t.api_key or (os.environ.get(t.api_key_env) if t.api_key_env else None)
     return (
         model,
         base_url if base_url is not None else (t.base_url if t else None),
-        api_key if api_key is not None else (t.api_key if t else None),
+        api_key,
         int(
             max_tokens
             if max_tokens is not None

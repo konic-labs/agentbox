@@ -196,3 +196,25 @@ def test_task_select_by_pass_rate(tmp_path: Path) -> None:
     assert ids == ["a", "never_run"]
     r = runner.invoke(app, [*args, "--min-pass", "0.01", "--max-pass", "0.99", "--drop-unseen"])
     assert [json.loads(x)["task_id"] for x in out.read_text().splitlines()] == ["a"]
+
+
+def test_teacher_profile_api_key_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from agentbox.cli.generate import _teacher
+    from agentbox.config_load import EndpointConfig, ProjectConfig
+
+    monkeypatch.setenv("TEACHER_KEY", "sk-teacher")
+    project = ProjectConfig(teacher=EndpointConfig(model="t", api_key_env="TEACHER_KEY"))
+    st = SimpleNamespace(project=project)
+    model, _, key, *_ = _teacher(st, None, None, None, None, None, None, None)  # type: ignore[arg-type]
+    assert (model, key) == ("t", "sk-teacher")
+    _, _, flag_key, *_ = _teacher(st, None, None, "sk-flag", None, None, None, None)  # type: ignore[arg-type]
+    assert flag_key == "sk-flag"
+
+
+async def test_task_generator_is_an_async_context_manager() -> None:
+    from agentbox.tasks.generate import GenerateConfig, TaskGenerator
+
+    async with TaskGenerator(GenerateConfig(model="m", use_dspy=False)) as gen:
+        assert gen._client is None  # clients are created lazily
