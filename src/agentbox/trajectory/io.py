@@ -75,7 +75,7 @@ class JsonlSink:
 
 
 class DirectorySink:
-    """One JSON file per trajectory: ``<dir>/<task_id>_<rollout_id[:8]>.json``."""
+    """One JSON file per trajectory: ``<dir>/<task_id>_<sample_index>_<rollout_id[:12]>.json``."""
 
     def __init__(self, directory: str | Path, *, indent: int | None = None) -> None:
         self.directory = Path(directory)
