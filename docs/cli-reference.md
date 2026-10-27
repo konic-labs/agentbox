@@ -1147,6 +1147,7 @@ $ agentbox config validate [OPTIONS]
 
 **Options**:
 
+* `--strict`: Unknown keys are errors
 * `--help`: Show this message and exit.
 
 ### `agentbox config path`

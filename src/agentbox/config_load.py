@@ -23,6 +23,7 @@ model profiles).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from pathlib import Path
@@ -33,6 +34,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from agentbox.config import AgentConfig, ModelConfig, SandboxConfig
 from agentbox.errors import AgentBoxError
 from agentbox.rewards import RewardSpec
+
+logger = logging.getLogger("agentbox.config")
 
 CONFIG_NAMES = ("agentbox.yaml", "agentbox.yml", "agentbox.toml", "agentbox.json")
 _VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:-|:\?)([^}]*))?\}")
@@ -193,6 +196,8 @@ def load_project_config(path: Path | None = None, *, required: bool = False) -> 
         data["students"] = data.pop("models")
     known = set(ProjectConfig.model_fields) - {"extra", "path"}
     extra = {k: v for k, v in data.items() if k not in known}
+    if extra:  # usually a typo (`sandobx:`): say so instead of silently ignoring it
+        logger.warning("%s: unknown top-level keys ignored: %s", p, sorted(extra))
     try:
         cfg = ProjectConfig.model_validate({k: v for k, v in data.items() if k in known})
     except ValidationError as exc:

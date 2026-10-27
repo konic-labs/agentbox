@@ -60,6 +60,15 @@ def test_bad_config_is_reported(tmp_path: Path) -> None:
     assert r.exit_code == 2
 
 
+def test_unknown_config_keys_are_reported(tmp_path: Path) -> None:
+    cfg = tmp_path / "agentbox.yaml"
+    cfg.write_text("sandobx:\n  image: x\nmodels:\n  m: {model: x}\n")
+    r = runner.invoke(app, ["--json", "--config", str(cfg), "config", "validate"])
+    assert r.exit_code == 0 and json.loads(r.stdout)["unknown_keys"] == ["sandobx"]
+    r = runner.invoke(app, ["--config", str(cfg), "config", "validate", "--strict"])
+    assert r.exit_code == 2
+
+
 def test_task_commands(tmp_path: Path) -> None:
     r = runner.invoke(app, ["task", "new", str(tmp_path / "t1")])
     assert r.exit_code == 0 and (tmp_path / "t1" / "files" / "test_solution.py").exists()
