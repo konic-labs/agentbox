@@ -84,6 +84,11 @@ docker run --rm -v "$PWD":/work -w /work mcr.microsoft.com/playwright/python:v1.
   bash -c "pip install -q playwright==1.64.1 && python scripts/art/render.py docs/assets/readme /tmp/png"
 ```
 
+`python scripts/art/art.py --og og/og-image.svg` also writes the social
+preview (1280 × 640). Render it with `render.py og /tmp/png`, and save the dark
+one as `.github/og-image.png`. GitHub has no API for the social preview, so
+upload it under Settings → General → Social preview.
+
 Show an image with a plain `<img>` or a Markdown image, never inside a
 `<picture>`, because GitHub's mobile apps drop a `<picture>` and its image.
 Give it alt text that says what it shows (`alt=""` for a decorative one).

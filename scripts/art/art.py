@@ -12,7 +12,7 @@ there is no script and no outside reference, both themes are inside the file
 motion. The non-animated state of every element is its final frame, so
 renderers without CSS animation show the finished picture.
 
-    python scripts/art/art.py [--out docs/assets/readme] [--fonts DIR] [--data FILE]
+    python scripts/art/art.py [--out docs/assets/readme] [--fonts DIR] [--data FILE] [--og PATH]
 
   banner.svg    the top of the README: the chamber opens, agentbox in red dots
   facts.svg     a strip of facts under the banner
@@ -22,6 +22,9 @@ renderers without CSS animation show the finished picture.
   compare.svg   the held-out tasks before and after training, from the same file
   pipeline.svg  provision -> loop -> verify -> reward -> record, for the docs
   footer.svg    the Konic mark in red strokes, konic.io
+
+With --og, it also writes the social preview (1280 x 640). render.py turns it into
+.github/og-image.png, which the repository settings use as the social preview image.
 """
 
 from __future__ import annotations
@@ -454,6 +457,45 @@ def banner(t: Type) -> str:
     return svg.render()
 
 
+def og(t: Type) -> str:
+    """The social preview (1280 x 640): the banner's pieces, still, sized for small cards."""
+    svg = Svg(W, 640, "agentbox: sandboxes, rewards and exact trajectories for RL post-training")
+    field_bg(svg, 0.55)
+    svg.defs.append(edge_dots_def())
+    width = red_dot_word(svg, t, "agentbox", 150, 74, 250)
+    svg.add(dotted_line(80, 80 + width, 284, r=1.8))
+    for i, line in enumerate(
+        ("Sandboxes, rewards and exact trajectories", "for RL post-training of LLM agents.")
+    ):
+        svg.add(text(t, line, DISPLAY, 38, 80, 352 + 48 * i, "ink", weight=500))
+    by = 446
+    svg.add(band(0, by, W, 116))
+    items = [
+        ("create", "agentbox-fix-add-3f9a1c2e"),
+        ("image", "python:3.12-slim-bookworm"),
+        ("network", "none"),
+        ("seed", "calc.py  test_calc.py"),
+    ]
+    svg.add(*rows(t, 80, by + 30, items, size=16, gap=22, label_w=104))
+    svg.add(text(t, "exit 0", MONO, 18, 1200, by + 40, "muted", anchor="end"))
+    svg.add(text(t, "reward 1.0", MONO, 18, 1200, by + 68, "red", anchor="end"))
+    svg.add(text(t, "KONIC / AGENTBOX", MONO, 14, 80, 606, "faint", tracking=0.12))
+    svg.add(
+        text(
+            t,
+            "TRL  VERL  OPENRLHF  SKYRL  ART",
+            MONO,
+            14,
+            1200,
+            606,
+            "faint",
+            tracking=0.12,
+            anchor="end",
+        )
+    )
+    return svg.render()
+
+
 FACTS = [
     "APACHE 2.0",
     "PYTHON 3.11+",
@@ -878,10 +920,16 @@ def main() -> int:
     ap.add_argument("--out", default=os.path.join(REPO, "docs", "assets", "readme"))
     ap.add_argument("--fonts")
     ap.add_argument("--data", help=f"training curves and verdict (default {TRAINING_DATA})")
+    ap.add_argument("--og", metavar="PATH", help="also write the social preview SVG here")
     args = ap.parse_args()
     try:
         for line in write_all(args.out, args.fonts, args.data):
             print(line)
+        if args.og:
+            body = og(Type(ensure_fonts(args.fonts)))
+            with open(args.og, "w", encoding="utf-8") as fh:
+                fh.write(body)
+            print(f"{args.og} {len(body) // 1024} KB")
     except ArtError as exc:
         print(f"art: {exc}", file=sys.stderr)
         return 1
