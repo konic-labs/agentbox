@@ -1,0 +1,381 @@
+{
+ "title": "Reward of 2 GRPO runs with AgentBox and verl on one GPU; held-out success 48.6% before and 77.8% after training",
+ "heading": "Reward while training",
+ "subheading": "Qwen3-0.6B, GRPO with verl 0.9.1 on one L4: 8 tasks \u00d7 8 samples per step",
+ "legend_val": "validation, 9 held-out tasks",
+ "legend_train": "training reward, 4-step mean",
+ "legend_replicate": "first run",
+ "footnote": "dots: training reward per step; validation is greedy; the verdict is agentbox bench run at temperature 0.6",
+ "runs": [
+  {
+   "train": [
+    [
+     1,
+     0.526
+    ],
+    [
+     2,
+     0.599
+    ],
+    [
+     3,
+     0.5729
+    ],
+    [
+     4,
+     0.3854
+    ],
+    [
+     5,
+     0.7708
+    ],
+    [
+     6,
+     0.6302
+    ],
+    [
+     7,
+     0.6771
+    ],
+    [
+     8,
+     0.526
+    ],
+    [
+     9,
+     0.7292
+    ],
+    [
+     10,
+     0.7812
+    ],
+    [
+     11,
+     0.5885
+    ],
+    [
+     12,
+     0.7396
+    ],
+    [
+     13,
+     0.9688
+    ],
+    [
+     14,
+     0.6771
+    ],
+    [
+     15,
+     0.599
+    ],
+    [
+     16,
+     0.6875
+    ],
+    [
+     17,
+     0.7708
+    ],
+    [
+     18,
+     0.8125
+    ],
+    [
+     19,
+     0.6615
+    ],
+    [
+     20,
+     0.9167
+    ],
+    [
+     21,
+     0.9375
+    ],
+    [
+     22,
+     0.9583
+    ],
+    [
+     23,
+     0.8698
+    ],
+    [
+     24,
+     0.6875
+    ],
+    [
+     25,
+     0.7812
+    ],
+    [
+     26,
+     0.901
+    ],
+    [
+     27,
+     0.8385
+    ],
+    [
+     28,
+     0.9688
+    ],
+    [
+     29,
+     0.7917
+    ],
+    [
+     30,
+     0.7604
+    ]
+   ],
+   "val": [
+    [
+     0,
+     0.7037
+    ],
+    [
+     5,
+     0.6667
+    ],
+    [
+     10,
+     0.5556
+    ],
+    [
+     15,
+     0.8519
+    ],
+    [
+     20,
+     0.7407
+    ],
+    [
+     25,
+     0.8148
+    ],
+    [
+     30,
+     0.8889
+    ]
+   ]
+  },
+  {
+   "train": [
+    [
+     1,
+     0.5156
+    ],
+    [
+     2,
+     0.6198
+    ],
+    [
+     3,
+     0.5521
+    ],
+    [
+     4,
+     0.3958
+    ],
+    [
+     5,
+     0.7083
+    ],
+    [
+     6,
+     0.6198
+    ],
+    [
+     7,
+     0.599
+    ],
+    [
+     8,
+     0.4948
+    ],
+    [
+     9,
+     0.651
+    ],
+    [
+     10,
+     0.8177
+    ],
+    [
+     11,
+     0.4948
+    ],
+    [
+     12,
+     0.5938
+    ],
+    [
+     13,
+     0.9531
+    ],
+    [
+     14,
+     0.6875
+    ],
+    [
+     15,
+     0.5469
+    ],
+    [
+     16,
+     0.6667
+    ],
+    [
+     17,
+     0.8542
+    ],
+    [
+     18,
+     0.8073
+    ],
+    [
+     19,
+     0.6042
+    ],
+    [
+     20,
+     0.8333
+    ],
+    [
+     21,
+     0.8906
+    ],
+    [
+     22,
+     0.8698
+    ],
+    [
+     23,
+     0.8021
+    ],
+    [
+     24,
+     0.6667
+    ],
+    [
+     25,
+     0.75
+    ],
+    [
+     26,
+     0.8073
+    ],
+    [
+     27,
+     0.7812
+    ],
+    [
+     28,
+     0.9531
+    ],
+    [
+     29,
+     0.8229
+    ]
+   ],
+   "val": [
+    [
+     0,
+     0.5926
+    ],
+    [
+     5,
+     0.8148
+    ],
+    [
+     10,
+     0.7778
+    ],
+    [
+     15,
+     0.7407
+    ],
+    [
+     20,
+     0.7407
+    ],
+    [
+     25,
+     0.8519
+    ]
+   ]
+  }
+ ],
+ "eval": {
+  "label": "HELD-OUT SUCCESS",
+  "base_label": "base model",
+  "base": 0.4861,
+  "trained_label": "after 30 steps",
+  "trained": 0.7778,
+  "note": [
+   "9 tasks \u00d7 8, 4 better, 0 worse",
+   "first run: 83.3%"
+  ]
+ },
+ "compare_title": "Held-out tasks before and after training: 4 better, 0 worse, 5 unchanged",
+ "compare_heading": "Held-out tasks, before and after.",
+ "compare_subheading": "agentbox bench compare: successes per task, base model and after 30 GRPO steps",
+ "tasks": [
+  {
+   "id": "bug_reverse",
+   "n": 8,
+   "base": 0,
+   "trained": 3
+  },
+  {
+   "id": "bug_shout",
+   "n": 8,
+   "base": 0,
+   "trained": 8
+  },
+  {
+   "id": "bug_total",
+   "n": 8,
+   "base": 0,
+   "trained": 0
+  },
+  {
+   "id": "file_00",
+   "n": 8,
+   "base": 8,
+   "trained": 8
+  },
+  {
+   "id": "file_05",
+   "n": 8,
+   "base": 8,
+   "trained": 8
+  },
+  {
+   "id": "file_06",
+   "n": 8,
+   "base": 8,
+   "trained": 8
+  },
+  {
+   "id": "file_11",
+   "n": 8,
+   "base": 8,
+   "trained": 8
+  },
+  {
+   "id": "stub_is_prime",
+   "n": 8,
+   "base": 2,
+   "trained": 7
+  },
+  {
+   "id": "stub_word_count",
+   "n": 8,
+   "base": 1,
+   "trained": 6
+  }
+ ]
+}

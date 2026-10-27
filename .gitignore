@@ -26,6 +26,9 @@ wheels/
 /venv/
 /ENV/
 
+# Fonts fetched by scripts/art/art.py
+.cache/
+
 # Testing / typing
 .pytest_cache/
 .mypy_cache/
