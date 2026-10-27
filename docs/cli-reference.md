@@ -445,6 +445,7 @@ $ agentbox task [OPTIONS] COMMAND [ARGS]...
 * `check`: Docker QC: the starter must FAIL the...
 * `show`: Show a task (files listed, verifier,...
 * `ls`: List tasks in files/dirs/datasets.
+* `select`: Keep tasks by observed pass rate, e.g.
 * `schema`: Print the task JSON Schema (for editors /...
 
 ### `agentbox task new`
@@ -558,6 +559,32 @@ $ agentbox task ls [OPTIONS] {sources}...
 
 **Options**:
 
+* `--help`: Show this message and exit.
+
+### `agentbox task select`
+
+Keep tasks by observed pass rate, e.g. the learnable band for GRPO.
+
+agentbox task select tasks/ --runs runs/probe --min-pass 0.01 --max-pass 0.99 -o learnable.jsonl
+
+**Usage**:
+
+```console
+$ agentbox task select [OPTIONS] {sources}...
+```
+
+**Arguments**:
+
+* `sources...`: Task files/dirs/datasets  [required]
+
+**Options**:
+
+* `--runs <path>`: Trajectories with observed outcomes (repeat)  [required]
+* `-o, --out <path>`: Selected tasks (.jsonl[.gz])  [required]
+* `--min-pass <float>`: Lowest pass rate kept  [default: 0.0]
+* `--max-pass <float>`: Highest pass rate kept  [default: 1.0]
+* `--min-samples <int>`: Fewer observations count as unseen  [default: 1]
+* `--drop-unseen`: Drop tasks without enough observations
 * `--help`: Show this message and exit.
 
 ### `agentbox task schema`
