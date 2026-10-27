@@ -15,6 +15,7 @@ Optional bearer auth (``AGENTBOX_SERVER_TOKEN``), a session cap and an idle reap
 
 import asyncio
 import contextlib
+import hmac
 import logging
 import os
 import time
@@ -89,8 +90,13 @@ def create_app(settings: ServerSettings | None = None) -> Any:
 
     app = FastAPI(title="AgentBox environment server", lifespan=lifespan)
 
+    expected = f"Bearer {cfg.token}".encode() if cfg.token else None
+
     async def auth(request: Request) -> None:
-        if cfg.token and request.headers.get("authorization") != f"Bearer {cfg.token}":
+        if expected is None:
+            return
+        given = request.headers.get("authorization", "").encode()
+        if not hmac.compare_digest(given, expected):  # constant time
             raise HTTPException(status_code=401, detail="invalid or missing bearer token")
 
     def get(sid: str) -> _Session:
