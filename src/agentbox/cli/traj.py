@@ -70,6 +70,7 @@ def traj_show(ctx: typer.Context, path: Annotated[Path, typer.Argument()]) -> No
             "duration_s": round(t.metrics.duration_s, 2),
             "verify": t.verify.model_dump(exclude={"stdout", "stderr"}) if t.verify else None,
             "error": t.error,
+            "kept_sandbox": t.metadata.get("kept_sandbox"),
         }
 
         def human(t: Any = t, data: dict[str, Any] = data) -> None:
@@ -87,6 +88,11 @@ def traj_show(ctx: typer.Context, path: Annotated[Path, typer.Argument()]) -> No
                     typer.echo("--- verify stdout (tail) ---\n" + t.verify.stdout[-1200:])
             if t.error:
                 typer.secho(f"error: {t.error}", fg=typer.colors.RED)
+            if data["kept_sandbox"]:
+                typer.echo(
+                    f"sandbox kept: {data['kept_sandbox']} "
+                    f"(agentbox sandbox shell {data['kept_sandbox']})"
+                )
             for r in t.tool_call_records[-6:]:
                 typer.echo(
                     f"  step {r.step} {r.name}{' ERR' if r.is_error else ''} ({r.duration_s:.2f}s)"
