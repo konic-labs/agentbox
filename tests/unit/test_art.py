@@ -72,6 +72,23 @@ def test_the_trailing_mean_smooths_the_curve() -> None:
     ]
 
 
+def test_the_dither_is_konic_websites_math() -> None:
+    # the Bayer table and hash of konic-website-v2's DitherBackground
+    assert art.bayer8(0, 0) == 0.5 / 64
+    assert art.bayer8(1, 0) == 32.5 / 64 and art.bayer8(0, 1) == 48.5 / 64
+    assert art.bayer8(8, 16) == art.bayer8(0, 0)
+    assert 0 <= art.hash21(3.7, 9.1) < 1
+
+
+def test_the_dither_field_stays_clear_of_the_text() -> None:
+    dots = art.dither_dots(1280, 636, coverage=0.3, amplitude=0.1, cell=14)
+    assert dots == art.dither_dots(1280, 636, coverage=0.3, amplitude=0.1, cell=14)  # still
+    assert max(x + size for x, _, size, _, _ in dots) < art.OG_TEXT_X - 64
+    reds = [alpha for *_, red, alpha in dots if red]
+    blacks = [alpha for *_, red, alpha in dots if not red]
+    assert reds and blacks and max(blacks) <= 0.2 + 1e-9  # black dots at 20 % at most
+
+
 def test_the_training_data_is_a_measured_curve() -> None:
     data = json.loads(Path(art.TRAINING_DATA).read_text())
     for run in data["runs"]:
