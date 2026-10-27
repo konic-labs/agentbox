@@ -95,15 +95,17 @@ def test_trl_environment_factory_sync() -> None:
     env = Env()
     assert {"read_file", "write_file", "run_tests"} <= set(dir(env))
     assert not hasattr(env, "run_command")
-    prompt = env.reset(task_id="add")
+    prompt = env.reset(task_id="add")  # no prompt column: the environment supplies it
     assert "calc.py" in (prompt or "")
+    rows = tasks_to_rows([TASK])
+    # TRL appends reset()'s return value to the row's prompt: never duplicate it
+    assert env.reset(**rows[0]) is None
     assert "return a - b" in env.read_file("calc.py")
     env.write_file("calc.py", FIX)
     assert "passed" in env.run_tests()
     assert env.get_reward() == 1.0 and env.last_trajectory is not None
     env.reset()  # self-sampling path
     assert env.get_reward() == 0.0
-    rows = tasks_to_rows([TASK])
     assert rows[0]["task_id"] == "add" and rows[0]["prompt"][-1]["role"] == "user"
     try:
         from transformers.utils import get_json_schema
