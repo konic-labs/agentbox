@@ -65,7 +65,7 @@ async def main() -> None:
     out = Path("out/hello_traj.json")
     traj.save(out)
     print("saved:", out)
-    print("art reward:", traj.to_art_dict()["reward"])
+    print("reward breakdown:", traj.reward_breakdown, "failure kind:", traj.failure_kind)
 
 
 if __name__ == "__main__":
