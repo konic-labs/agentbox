@@ -131,6 +131,7 @@ For a single rollout, settings resolve in this order (later wins):
 | `AGENTBOX_PROFILE` | Default `--profile` |
 | `AGENTBOX_DOCKER_IO_THREADS` | Exec/archive thread pool size (default 128) |
 | `AGENTBOX_DOCKER_CTL_THREADS` | Create/remove/inspect thread pool size (default 16) |
+| `AGENTBOX_REAP_ORPHANS` | `0` disables removing dead processes' sandboxes at startup |
 | `AGENTBOX_TASKS` | Task source used by the verl/OpenRLHF/SkyRL adapters to resolve `task_id`s |
 | `AGENTBOX_VERL_CONFIG` / `AGENTBOX_OPENRLHF_CONFIG` / `AGENTBOX_SKYRL_CONFIG` | YAML/JSON with `sandbox`, `agent`, `rewards` sections for those adapters |
 | `AGENTBOX_SERVER_TOKEN` | Bearer token required by `agentbox serve` |
