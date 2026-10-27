@@ -18,9 +18,10 @@ pytest tests/unit -q                       # no Docker, a few seconds
 pytest tests/integration -m docker -q      # real sandboxes, about 40 s
 bash scripts/ci_smoke.sh --docker          # every CLI workflow with the mock model
 python scripts/gen_reference_docs.py       # regenerate docs/cli-reference.md and docs/config-reference.md
+python scripts/check_docs.py              # links, anchors and images in the README and docs
 ```
 
-CI (`.github/workflows/ci.yml`) runs lint, types and the reference-docs check;
+CI (`.github/workflows/ci.yml`) runs lint, types, the reference-docs check and the docs check;
 unit tests on Python 3.11, 3.12 and 3.13; Docker integration tests plus the
 Docker smoke test; and a build with `twine check --strict` and a clean wheel
 install.
@@ -49,6 +50,46 @@ its script per conversation, so it is safe under concurrency.
 
 Every config field needs a `Field(description=...)`: the reference docs and
 `agentbox config show` are generated from them.
+
+## Docs images
+
+Every image the README and the docs show lives in `docs/assets/readme/`, and
+`scripts/art/art.py` draws them all:
+
+```bash
+pip install fonttools
+python scripts/art/art.py      # fetches the fonts once, writes docs/assets/readme/*.svg
+```
+
+The art comes from the AgentBox release film. A fog field sits under a
+halftone screen. A pale chamber band opens for one rollout and prints its
+container in Space Mono, then the exit code gives the verdict. Finally the
+band shuts into a line of red dots: the trajectory. Konic red is the only
+accent.
+
+Each SVG stands alone. Its text is outlined from Inter Tight and Space Mono,
+which the script fetches at pinned commits and checks by SHA-256. A file has
+no scripts and no outside references. Both themes are inside the file and
+follow the reader's system theme (`prefers-color-scheme`). Animations stop for
+readers who ask for reduced motion. Without animation, each element shows its
+final frame.
+
+`training.svg` is drawn from `scripts/art/training.json`. `scripts/art/curve.py`
+builds that file from real runs: verl console logs and an
+`agentbox --json bench compare` report. `scripts/art/render.py` renders PNG
+previews in both themes for a visual check, in the Playwright container:
+
+```bash
+docker run --rm -v "$PWD":/work -w /work mcr.microsoft.com/playwright/python:v1.64.1-noble \
+  bash -c "pip install -q playwright==1.64.1 && python scripts/art/render.py docs/assets/readme /tmp/png"
+```
+
+Show an image with a plain `<img>` or a Markdown image, never inside a
+`<picture>`, because GitHub's mobile apps drop a `<picture>` and its image.
+Give it alt text that says what it shows (`alt=""` for a decorative one).
+`python scripts/check_docs.py` checks this, along with every relative link and
+anchor, image sizes (under 300 KB), and that every file in `docs/assets/` is
+shown by some page. CI runs it.
 
 ## Commits and releases
 
