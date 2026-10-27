@@ -159,6 +159,12 @@ class TaskGenerator:
                 await client.close()
         self._client = self._validator_client = None
 
+    async def __aenter__(self) -> TaskGenerator:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self.aclose()
+
     async def generate(
         self,
         *,
