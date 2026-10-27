@@ -100,6 +100,17 @@ class SandboxConfig(BaseModel):
         description="Snapshot task setup_commands into cached images reused by later rollouts.",
     )
     cache_max_images: int = Field(default=64, description="LRU bound on cached setup images.")
+    warm_pool: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Pre-started containers kept ready per sandbox shape (image, limits, env); "
+            "each is used by one rollout only. 0 disables the pool."
+        ),
+    )
+    warm_pool_ttl_s: float = Field(
+        default=300.0, gt=0, description="Idle pooled containers are removed after this long."
+    )
 
 
 class ModelConfig(BaseModel):

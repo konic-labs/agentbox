@@ -335,6 +335,38 @@ class DockerBackend:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._ctl, functools.partial(fn, *args, **kwargs))
 
+    def submit_ctl(self, fn: Callable[..., T], *args: Any, **kwargs: Any) -> Future[T]:
+        """Run ``fn`` on the control pool without awaiting it (background work)."""
+        return self._ctl.submit(fn, *args, **kwargs)
+
+    async def run_ctl_owned(
+        self, fn: Callable[..., str | None], *args: Any, **kwargs: Any
+    ) -> str | None:
+        """Run a control call that yields a new container id, owning the result.
+
+        The call cannot be interrupted once it runs in its thread; if the awaiting
+        task is cancelled meanwhile, the container it produces is removed on
+        arrival instead of running until process exit.
+        """
+        loop = asyncio.get_running_loop()
+        fut = loop.run_in_executor(self._ctl, functools.partial(fn, *args, **kwargs))
+        try:
+            return await asyncio.shield(fut)
+        except asyncio.CancelledError:
+
+            def reap(done: asyncio.Future[str | None]) -> None:
+                if done.cancelled() or done.exception() is not None:
+                    return
+                cid = done.result()
+                if cid:
+                    try:
+                        self.submit_ctl(self.remove_container_sync, cid)
+                    except RuntimeError:  # shut down: exit cleanup removes it
+                        pass
+
+            fut.add_done_callback(reap)
+            raise
+
     async def run_io(self, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._io, functools.partial(fn, *args, **kwargs))
@@ -613,7 +645,9 @@ class DockerBackend:
         return cid
 
     async def create_container(self, spec: ContainerSpec) -> str:
-        return await self.run_ctl(self.create_container_sync, spec)
+        cid = await self.run_ctl_owned(self.create_container_sync, spec)
+        assert cid is not None
+        return cid
 
     def remove_container_sync(self, cid: str) -> None:
         """SIGKILL + remove (with anonymous volumes) in a single API call."""

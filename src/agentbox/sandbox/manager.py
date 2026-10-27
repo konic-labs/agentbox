@@ -18,6 +18,7 @@ from agentbox.config import SandboxConfig
 from agentbox.errors import SandboxError
 from agentbox.sandbox.backend import ContainerSpec, DockerBackend, container_name, get_backend
 from agentbox.sandbox.paths import relative_to_workspace, resolve_workspace_path
+from agentbox.sandbox.pool import pool_for
 from agentbox.sandbox.types import ExecResult, Sandbox
 
 logger = logging.getLogger("agentbox.sandbox")
@@ -161,9 +162,20 @@ class SandboxManager:
             }
         )
         t0 = time.monotonic()
-        cid = await self.backend.create_container(
-            self.container_spec(image=image, name=name, labels=all_labels)
-        )
+        spec = self.container_spec(image=image, name=name, labels=all_labels)
+        cid: str | None = None
+        if cfg.warm_pool > 0:
+            pool = pool_for(self.backend, ttl_s=cfg.warm_pool_ttl_s)
+            cid = await self.backend.run_ctl_owned(
+                pool.acquire_sync,
+                spec,
+                size=cfg.warm_pool,
+                prepare=self._prepare_sync,
+                extra=cfg.workspace_dir,
+            )
+        pooled = cid is not None
+        if cid is None:
+            cid = await self.backend.create_container(spec)
         sandbox = Sandbox(
             id=cid,
             name=name,
@@ -176,17 +188,52 @@ class SandboxManager:
             created_at=time.time(),
             _manager=self,
         )
-        if cfg.workspace_dir != cfg.working_dir:
+        if cfg.workspace_dir != cfg.working_dir and not pooled:
             # Docker only auto-creates working_dir.
             await self.exec(sandbox, ["mkdir", "-p", "--", cfg.workspace_dir], timeout_s=30.0)
         logger.debug(
-            "sandbox.created id=%s name=%s image=%s duration_s=%.3f",
+            "sandbox.created id=%s name=%s image=%s pooled=%s duration_s=%.3f",
             cid[:12],
             name,
             image,
+            pooled,
             time.monotonic() - t0,
         )
         return sandbox
+
+    def _prepare_sync(self, cid: str) -> None:
+        """Task-independent setup done ahead of time for pooled containers."""
+        cfg = self.config
+        if cfg.workspace_dir == cfg.working_dir:
+            return
+        res = self.backend.exec_sync(
+            cid,
+            ["mkdir", "-p", "--", cfg.workspace_dir],
+            timeout_s=30.0,
+            workdir=cfg.working_dir,
+            user=cfg.security.user,
+        )
+        if res.exit_code != 0:
+            raise SandboxError(f"mkdir {cfg.workspace_dir} failed: {res.stderr or res.stdout}")
+
+    async def warm(self, n: int | None = None, *, image: str | None = None) -> int:
+        """Pre-start ``n`` (default ``warm_pool``) containers of this config's default shape.
+
+        Returns immediately; containers are created in the background. Rollouts
+        whose task overrides the image or environment use their own shapes.
+        """
+        cfg = self.config
+        count = cfg.warm_pool if n is None else n
+        if count <= 0:
+            return 0
+        resolved = await self.resolve_image(image)
+        spec = self.container_spec(
+            image=resolved, name="", labels=self.backend._labels(dict(cfg.labels))
+        )
+        pool_for(self.backend, ttl_s=cfg.warm_pool_ttl_s).prefill(
+            spec, count, prepare=self._prepare_sync, extra=cfg.workspace_dir
+        )
+        return count
 
     async def destroy(self, sandbox: Sandbox, *, force: bool = True) -> None:  # noqa: ARG002
         if sandbox.status == "destroyed":
