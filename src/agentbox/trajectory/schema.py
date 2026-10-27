@@ -98,6 +98,7 @@ class TrajectoryMetrics(BaseModel):
     model_latency_s: float | None = None
     tool_latency_s: float | None = None
     attempts: int = 1  # rollout attempts including infra retries
+    salvaged_tool_calls: int = 0  # tool calls recovered from content (server parse failures)
 
 
 class VerifyInfo(BaseModel):

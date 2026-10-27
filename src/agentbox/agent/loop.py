@@ -43,6 +43,7 @@ class AgentLoopResult(BaseModel):
     usage_totals: dict[str, int] = Field(default_factory=dict)
     failure_kind: FailureKind = FailureKind.NONE
     submitted_answer: str | None = None
+    salvaged_tool_calls: int = 0  # native protocol: calls the server left as <tool_call> text
 
 
 class AgentHooks:
@@ -175,6 +176,7 @@ class AgentLoop:
         records: list[ToolCallRecord] = []
         usage_totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         model_calls = 0
+        salvaged = 0
         step = 0
         ctx.deadline = episode_deadline
         tokens = TokenTracker()
@@ -199,6 +201,7 @@ class AgentLoop:
                 usage_totals=usage_totals,
                 failure_kind=failure,
                 submitted_answer=answer,
+                salvaged_tool_calls=salvaged,
             )
 
         try:
@@ -253,6 +256,13 @@ class AgentLoop:
                 if hermes and not assistant.tool_calls:
                     _, parsed = parse_hermes_tool_calls(assistant.content)
                     assistant.tool_calls = parsed or None
+                elif cfg.salvage_tool_calls and not assistant.tool_calls:
+                    # the server's tool parser rejected the call (e.g. invalid JSON):
+                    # recover it instead of treating the turn as a final answer
+                    rest, parsed = parse_hermes_tool_calls(assistant.content)
+                    if parsed:
+                        assistant.content, assistant.tool_calls = rest, parsed
+                        salvaged += len(parsed)
                 convo.add(assistant)
 
                 if self.on_step:

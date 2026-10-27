@@ -27,6 +27,7 @@ class AggregateMetrics(BaseModel):
     mean_total_tokens: float | None = None
     tool_error_rate: float = 0.0
     infra_failures: int = 0
+    salvaged_tool_calls: int = 0
     by_status: dict[str, int] = Field(default_factory=dict)
     by_failure_kind: dict[str, int] = Field(default_factory=dict)
     by_task: dict[str, dict[str, Any]] = Field(default_factory=dict)
@@ -58,6 +59,7 @@ class MetricsAccumulator:
         self._tokens_n = 0
         self._durations: list[float] = []
         self.infra_failures = 0
+        self.salvaged_tool_calls = 0
         self.by_status: dict[str, int] = defaultdict(int)
         self.by_failure_kind: dict[str, int] = defaultdict(int)
         self._tasks: dict[str, _TaskAcc] = {}
@@ -71,6 +73,7 @@ class MetricsAccumulator:
         self._steps += t.metrics.steps
         self._tools += t.metrics.tool_calls
         self._tool_errors += sum(1 for r in t.tool_call_records if r.is_error)
+        self.salvaged_tool_calls += t.metrics.salvaged_tool_calls
         if t.metrics.total_tokens is not None:
             self._tokens += t.metrics.total_tokens
             self._tokens_n += 1
@@ -128,6 +131,7 @@ class MetricsAccumulator:
             mean_total_tokens=(self._tokens / self._tokens_n) if self._tokens_n else None,
             tool_error_rate=(self._tool_errors / self._tools) if self._tools else 0.0,
             infra_failures=self.infra_failures,
+            salvaged_tool_calls=self.salvaged_tool_calls,
             by_status=dict(self.by_status),
             by_failure_kind=dict(self.by_failure_kind),
             by_task=by_task,

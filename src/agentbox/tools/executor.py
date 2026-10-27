@@ -21,7 +21,7 @@ from typing import Any
 from agentbox.tools.base import _CURRENT, BaseTool, ToolContext, ToolResult
 from agentbox.tools.registry import ToolRegistry
 from agentbox.trajectory.schema import Message, ToolCall, ToolCallRecord
-from agentbox.types import MessageRole
+from agentbox.types import INVALID_TOOL_CALL, MessageRole
 from agentbox.utils.jsonparse import loads_lenient
 from agentbox.utils.text import truncate_middle
 
@@ -113,6 +113,17 @@ class ToolExecutor:
         name = tc.function.name
         step = ctx.step
         tool = self.registry.get(name)
+        if tool is None and name == INVALID_TOOL_CALL:
+            info, _ = parse_arguments(tc.function.arguments)
+            reason = (info or {}).get("error") or "unparseable"
+            return self._outcome(
+                tc,
+                step,
+                f"ERROR: malformed tool call ({reason}). Emit one JSON object per call: "
+                '{"name": <tool name>, "arguments": {<parameters>}}',
+                is_error=True,
+                args=None,
+            )
         if tool is None:
             available = ", ".join(self.registry.names()) or "(none)"
             return self._outcome(

@@ -265,6 +265,13 @@ class AgentConfig(BaseModel):
         default="tool",
         description="hermes protocol only: send tool results as role=tool or wrapped user turns.",
     )
+    salvage_tool_calls: bool = Field(
+        default=True,
+        description=(
+            "native protocol: parse <tool_call> blocks the server's tool parser left in "
+            "the content (e.g. invalid JSON) instead of ending the episode."
+        ),
+    )
     drop_tools: list[str] = Field(default_factory=list, description="Tool names to remove.")
     drop_tools_prob: float = Field(
         default=0.0,

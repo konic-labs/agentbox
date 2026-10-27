@@ -139,6 +139,7 @@ Agent loop and tool selection settings.
 | `max_tool_output_chars` | int | `16000` | Tool results shown to the model are truncated head+tail. |
 | `tool_protocol` | 'native' \| 'hermes' | `'native'` | native: OpenAI tool_calls. hermes: tools rendered into the system prompt and <tool_call> blocks parsed from content (servers without tool parsing). |
 | `tool_response_role` | 'tool' \| 'user' | `'tool'` | hermes protocol only: send tool results as role=tool or wrapped user turns. |
+| `salvage_tool_calls` | bool | `True` | native protocol: parse <tool_call> blocks the server's tool parser left in the content (e.g. invalid JSON) instead of ending the episode. |
 | `drop_tools` | list[str] | `[]` | Tool names to remove. |
 | `drop_tools_prob` | float | `0.0` | Drop each tool with this probability per rollout (at least one stays). |
 | `include_thinking` | bool | `True` | Record model reasoning in the trajectory. |

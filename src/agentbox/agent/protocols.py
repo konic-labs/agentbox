@@ -13,6 +13,7 @@ import uuid
 from typing import Any
 
 from agentbox.trajectory.schema import FunctionCall, ToolCall
+from agentbox.types import INVALID_TOOL_CALL
 from agentbox.utils.jsonparse import loads_lenient
 
 HERMES_TOOLS_PREAMBLE = """# Tools
@@ -29,6 +30,8 @@ For each function call, return a json object with function name and arguments wi
 {{"name": <function-name>, "arguments": <args-json-object>}}
 </tool_call>"""
 
+_MAX_RAW_CHARS = 2000
+
 _CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.S)
 _OPEN_RE = re.compile(r"<tool_call>\s*(.*)$", re.S)
 
@@ -43,19 +46,23 @@ def _new_id() -> str:
     return f"call_{uuid.uuid4().hex[:24]}"
 
 
+def _invalid(blob: str, error: str) -> ToolCall:
+    # arguments stay valid JSON: native servers re-parse them when the turn is replayed
+    arguments = json.dumps({"raw": blob[:_MAX_RAW_CHARS], "error": error}, ensure_ascii=False)
+    return ToolCall(
+        id=_new_id(), function=FunctionCall(name=INVALID_TOOL_CALL, arguments=arguments)
+    )
+
+
 def _to_call(blob: str) -> ToolCall:
     try:
         data = loads_lenient(blob)
-    except ValueError:
+    except ValueError as exc:
         # Surface the malformed call to the agent instead of dropping it.
-        return ToolCall(
-            id=_new_id(), function=FunctionCall(name="invalid_tool_call", arguments=blob)
-        )
+        return _invalid(blob, str(exc))
     if not isinstance(data, dict):
-        return ToolCall(
-            id=_new_id(), function=FunctionCall(name="invalid_tool_call", arguments=blob)
-        )
-    name = str(data.get("name") or data.get("function") or "invalid_tool_call")
+        return _invalid(blob, "expected a JSON object")
+    name = str(data.get("name") or data.get("function") or INVALID_TOOL_CALL)
     args = data.get("arguments", data.get("parameters", {}))
     arguments = args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
     return ToolCall(id=_new_id(), function=FunctionCall(name=name, arguments=arguments))
