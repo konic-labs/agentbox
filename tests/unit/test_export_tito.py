@@ -277,6 +277,8 @@ async def test_verl_agent_loop_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(verl_mod, "AgentBoxEnv", FakeEnv)
     cls = build_agent_loop_class(FakeBase, tool_response=lambda text: text)
+    # verl registers f"{__module__}.{__qualname__}"; hydra must be able to import it
+    assert f"{cls.__module__}.{cls.__qualname__}" == "agentbox.integrations.verl.AgentBoxAgentLoop"
     loop = cls()
     task = Task(task_id="t1", description="d", verifier=VerifierSpec(type=VerifierType.PYTEST))
     rows = tasks_to_verl_rows([task])
@@ -287,3 +289,6 @@ async def test_verl_agent_loop_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
     assert out.extra_fields["agentbox"]["reward_breakdown"] == {"verifier": 0.75}
     assert calls[0] == ("reset", "t1") and calls[-1] == ("close",)
     assert "read_file" in [s["function"]["name"] for s in loop.tool_schemas]
+    # verl's loop reads `tool.tool_schema` from every self.tools value (parsers, selection)
+    schemas = [t.tool_schema.model_dump() for t in loop.tools.values()]
+    assert [x["function"]["name"] for x in schemas] == [t.name for t in loop.tools.values()]
