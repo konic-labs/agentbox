@@ -211,7 +211,13 @@ class _TRLEnvBase:
         return outcome.message.content or ""
 
     def reset(self, task_id: str | None = None, **kwargs: Any) -> str | None:
-        """Start an episode for ``task_id`` (dataset column) or the next task."""
+        """Start an episode for ``task_id`` (dataset column) or the next task.
+
+        TRL passes the whole dataset row and appends the return value to the
+        row's last prompt message, so the task prompt is returned only when the
+        row carries no ``prompt`` (environment-owned data); rows built by
+        :func:`tasks_to_rows` already contain it.
+        """
         if self._active:
             self._env.close()
         cls = type(self)
@@ -221,7 +227,7 @@ class _TRLEnvBase:
         obs = self._env.reset(task)
         self._active = True
         self.reward = 0.0
-        return obs.prompt
+        return None if kwargs.get("prompt") else obs.prompt
 
     def get_reward(self) -> float:
         """Verify the sandbox state, compute the reward and release the sandbox."""
