@@ -23,7 +23,8 @@ renderers without CSS animation show the finished picture.
   pipeline.svg  provision -> loop -> verify -> reward -> record, for the docs
   footer.svg    the Konic mark in red strokes, konic.io
 
-With --og, it also writes the social preview (1280 x 640). render.py turns it into
+With --og, it also writes the social preview (1280 x 640): a light card with the Konic
+mark and a still frame of konic.io's dither field. render.py turns it into
 .github/og-image.png, which the repository settings use as the social preview image.
 """
 
@@ -32,6 +33,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import sys
 import urllib.request
@@ -224,8 +226,8 @@ _GLYPH_DEFS: dict[str, str] = {}
 
 
 # ------------------------------------------------------------------ svg
-def num(v: float) -> str:
-    s = f"{v:.2f}".rstrip("0").rstrip(".")
+def num(v: float, digits: int = 2) -> str:
+    s = f"{v:.{digits}f}".rstrip("0").rstrip(".")
     return s if s not in ("-0", "") else "0"
 
 
@@ -457,42 +459,128 @@ def banner(t: Type) -> str:
     return svg.render()
 
 
+# ------------------------------------------------------------ konic dither
+# A still frame of konic.io's dither field (components/site/DitherBackground.tsx in
+# konic-website-v2), ported value for value: Bayer-8 gated cells, half Konic red and half
+# black at 20 %, and a field that grows from one edge to a banded, sine-washed depth. The
+# site samples each cell on a 4 x 4 backing grid and upscales it without smoothing, so a
+# dot is the centre backing pixel: a crisp square a quarter of the cell wide. The card uses
+# 14 px cells (the component's dotSize), so the field survives being shown at half size.
+BAYER8 = (
+    0, 32, 8, 40, 2, 34, 10, 42, 48, 16, 56, 24, 50, 18, 58, 26,
+    12, 44, 4, 36, 14, 46, 6, 38, 60, 28, 52, 20, 62, 30, 54, 22,
+    3, 35, 11, 43, 1, 33, 9, 41, 51, 19, 59, 27, 49, 17, 57, 25,
+    15, 47, 7, 39, 13, 45, 5, 37, 63, 31, 55, 23, 61, 29, 53, 21,
+)  # fmt: skip
+BANDS = 96
+TAU = 2 * math.pi
+
+
+def bayer8(cx: int, cy: int) -> float:
+    return (BAYER8[cx % 8 + (cy % 8) * 8] + 0.5) / 64
+
+
+def hash21(x: float, y: float) -> float:
+    s = math.sin(x * 127.1 + y * 311.7) * 43758.5453123
+    return s - math.floor(s)
+
+
+def _ease(x: float) -> float:
+    x = min(1.0, max(0.0, x))
+    return x * x * (3 - 2 * x)
+
+
+def _wave(phase: float) -> float:
+    return _ease(0.5 + 0.5 * math.sin(phase)) * 2 - 1
+
+
+def band_depth(band: int, coverage: float, amplitude: float, t: float) -> float:
+    """How far the field reaches in one band: the base coverage plus its sine wash."""
+    osc = (
+        0.5 * _wave(t * (0.5 + 0.65 * hash21(band, 11)) * TAU + hash21(band, 11) * TAU)
+        + 0.32 * _wave(t * (1.4 + 1.4 * hash21(band, 23)) * TAU + hash21(band, 23) * TAU)
+        + 0.18 * _wave(t * (3.2 + 2.6 * hash21(band, 47)) * TAU + hash21(band, 47) * TAU + t * 0.17)
+    )
+    gain = 0.5 + 0.5 * hash21(band, 71)
+    return min(1.15, max(0.02, coverage + osc * gain * amplitude * 0.9))
+
+
+def dither_dots(
+    width: float,
+    height: float,
+    *,
+    coverage: float = 0.3,
+    amplitude: float = 0.1,
+    cell: float = 10.0,
+    t: float = 0.0,
+) -> list[tuple[float, float, float, bool, float]]:
+    """``(x, y, size, red, alpha)`` per dot of a field growing from the left edge."""
+    cells_x, cells_y = math.ceil(width / cell), math.ceil(height / cell)
+    dots = []
+    for cy in range(cells_y):
+        cell_y = cells_y - 1 - cy  # the site counts rows from the bottom
+        band = min(BANDS - 1, int((cy + 0.5) / cells_y * BANDS))
+        depth = band_depth(band, coverage, amplitude, t)
+        for cx in range(cells_x):
+            if (cx + 0.625) / cells_x > depth:  # the dot's own backing pixel, past the field
+                continue
+            seed, seed2 = hash21(cx + 3.7, cell_y + 9.1), hash21(cx + 17.3, cell_y + 5.5)
+            freq = 0.45 + seed
+            blink = _ease(0.5 + 0.5 * math.sin(t * freq * TAU + seed2 * TAU))
+            blink2 = _ease(0.5 + 0.5 * math.sin(t * (0.2 + 0.5 * seed2) * TAU + seed * 4))
+            on = blink * 0.65 + blink * blink2 * 0.35
+            if 0.78 + 0.16 * on < bayer8(cx, cell_y):
+                continue
+            if on < 0.35 and hash21(cx + math.floor(t * freq * 0.5), cell_y + 41) > 0.97:
+                continue  # a spark blinking off
+            alpha = 0.08 + 0.92 * on
+            red = bayer8(cx + 3, cell_y + 5) > 0.5
+            x, y = cx * cell + cell / 2, cy * cell + cell / 2
+            dots.append((x, y, cell / 4, red, alpha if red else 0.2 * alpha))
+    return dots
+
+
+def dither_svg(dots: list[tuple[float, float, float, bool, float]]) -> str:
+    """The dots as one path per colour and opacity step (24 steps)."""
+    groups: dict[tuple[bool, int], list[str]] = {}
+    for x, y, size, red, alpha in dots:
+        step = max(1, round(alpha * 24))
+        groups.setdefault((red, step), []).append(
+            f"M{num(x)} {num(y)}h{num(size)}v{num(size)}h-{num(size)}z"
+        )
+    return "".join(
+        f'<path d="{"".join(parts)}" fill="{RED if red else "#050505"}" fill-opacity="{num(step / 24)}"/>'
+        for (red, step), parts in sorted(groups.items())
+    )
+
+
+OG_W, OG_H = 1280, 640
+OG_TEXT_X = 600  # the text column; the dither stays well left of it
+
+
 def og(t: Type) -> str:
-    """The social preview (1280 x 640): the banner's pieces, still, sized for small cards."""
-    svg = Svg(W, 640, "agentbox: sandboxes, rewards and exact trajectories for RL post-training")
-    field_bg(svg, 0.55)
-    svg.defs.append(edge_dots_def())
-    width = red_dot_word(svg, t, "agentbox", 150, 74, 250)
-    svg.add(dotted_line(80, 80 + width, 284, r=1.8))
+    """The social preview (1280 x 640), light only: the Konic mark, the name, a dither field."""
+    svg = Svg(
+        OG_W,
+        OG_H,
+        "agentbox by Konic: sandboxes, rewards and exact trajectories for RL post-training of LLM agents",
+    )
+    svg.css.append(".og-ink{fill:#050505}.og-gray{fill:#737373}")
+    svg.add(f'<rect width="{OG_W}" height="{OG_H}" fill="#ffffff"/>')
+    svg.add(dither_svg(dither_dots(OG_W, OG_H - 4, coverage=0.3, amplitude=0.1, cell=14)))
+    x, mark = OG_TEXT_X, 44
+    # the Konic lockup of konic.io's cards: the mark, then the wordmark
+    svg.add(
+        f'<g transform="translate({x} 156) scale({num(mark / 512, 4)})">'
+        f'<path d="{MARK_D}" fill="{RED}"/></g>'
+    )
+    svg.add(text(t, "konic", DISPLAY, 36, x + mark + 14, 189, "og-ink", weight=300))
+    svg.add(text(t, "agentbox", DISPLAY, 112, x - 7, 346, "og-ink", tracking=-0.03, weight=400))
     for i, line in enumerate(
         ("Sandboxes, rewards and exact trajectories", "for RL post-training of LLM agents.")
     ):
-        svg.add(text(t, line, DISPLAY, 38, 80, 352 + 48 * i, "ink", weight=500))
-    by = 446
-    svg.add(band(0, by, W, 116))
-    items = [
-        ("create", "agentbox-fix-add-3f9a1c2e"),
-        ("image", "python:3.12-slim-bookworm"),
-        ("network", "none"),
-        ("seed", "calc.py  test_calc.py"),
-    ]
-    svg.add(*rows(t, 80, by + 30, items, size=16, gap=22, label_w=104))
-    svg.add(text(t, "exit 0", MONO, 18, 1200, by + 40, "muted", anchor="end"))
-    svg.add(text(t, "reward 1.0", MONO, 18, 1200, by + 68, "red", anchor="end"))
-    svg.add(text(t, "KONIC / AGENTBOX", MONO, 14, 80, 606, "faint", tracking=0.12))
-    svg.add(
-        text(
-            t,
-            "TRL  VERL  OPENRLHF  SKYRL  ART",
-            MONO,
-            14,
-            1200,
-            606,
-            "faint",
-            tracking=0.12,
-            anchor="end",
-        )
-    )
+        svg.add(text(t, line, DISPLAY, 27, x, 410 + 39 * i, "og-gray", weight=400))
+    svg.add(f'<rect y="{OG_H - 4}" width="{OG_W}" height="4" fill="#050505"/>')
     return svg.render()
 
 
