@@ -58,7 +58,9 @@ agentbox = "agentbox.cli.main:app"
 
 [project.urls]
 Homepage = "https://github.com/konic-labs/agentbox"
-Documentation = "https://github.com/konic-labs/agentbox#readme"
+Documentation = "https://github.com/konic-labs/agentbox/blob/main/docs/index.md"
+Changelog = "https://github.com/konic-labs/agentbox/blob/main/CHANGELOG.md"
+Issues = "https://github.com/konic-labs/agentbox/issues"
 
 [tool.hatch.version]
 path = "src/agentbox/version.py"
@@ -73,6 +75,7 @@ include = [
     "/examples",
     "/docs",
     "/README.md",
+    "/CHANGELOG.md",
     "/LICENSE",
 ]
 
