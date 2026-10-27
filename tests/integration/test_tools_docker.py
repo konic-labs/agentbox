@@ -78,3 +78,5 @@ async def test_list_files_marks_dirs(sandbox) -> None:  # type: ignore[no-untype
     assert "src/" in out.splitlines()
     missing = await ListFilesTool().execute(sandbox, path="nope")
     assert getattr(missing, "is_error", False)
+    # a file path lists itself, workspace-relative like every other tool path
+    assert str(await ListFilesTool().execute(sandbox, path="src/app.py")) == "src/app.py"
