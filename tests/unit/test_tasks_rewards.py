@@ -103,8 +103,11 @@ def test_iter_tasks_split_filter(tmp_path: Path) -> None:
 async def test_compute_reward_components() -> None:
     verify = SimpleNamespace(reward=1.0, success=True, tests_total=4, tests_passed=3, tampered=[])
     records = [
-        SimpleNamespace(is_error=True, result="ERROR: unknown tool 'x'"),
-        SimpleNamespace(is_error=False, result="ok"),
+        SimpleNamespace(name="x", is_error=True, result="ERROR: unknown tool 'x'"),
+        SimpleNamespace(name="read_file", is_error=False, result="ok"),
+        SimpleNamespace(
+            name="invalid_tool_call", is_error=True, result="ERROR: malformed tool call"
+        ),
     ]
     loop = SimpleNamespace(
         steps=5,
@@ -128,9 +131,9 @@ async def test_compute_reward_components() -> None:
     )
     assert parts["verifier"] == 1.0 and parts["verifier#2"] == 1.0
     assert abs(parts["step_penalty"] + 0.05) < 1e-12
-    assert abs(parts["tool_error_penalty"] + 0.1) < 1e-12
-    assert parts["valid_tool_call_ratio"] == 0.25
-    assert abs(total - (1 - 0.05 - 0.1 + 0.25 + 0 + 0.1 + 1)) < 1e-9
+    assert abs(parts["tool_error_penalty"] + 0.2) < 1e-12
+    assert abs(parts["valid_tool_call_ratio"] - 0.5 / 3) < 1e-12  # 1 of 3 calls well-formed
+    assert abs(total - (1 - 0.05 - 0.2 + 0.5 / 3 + 0 + 0.1 + 1)) < 1e-9
     with pytest.raises(KeyError):
         await compute_reward([RewardSpec(name="nope")], ctx)
 
@@ -147,3 +150,27 @@ async def test_dotted_path_reward_and_defaults() -> None:
 
 def _const_reward(ctx: RewardContext) -> float:
     return 0.5
+
+
+async def test_llm_judge_reuses_one_client_per_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    import agentbox.rewards as rewards
+
+    created: list[object] = []
+
+    class StubClient:
+        def __init__(self, cfg: object) -> None:
+            created.append(cfg)
+
+        async def complete(self, messages: object, *a: object, **kw: object) -> object:
+            return SimpleNamespace(content='{"score": 0.8, "reason": "fine"}')
+
+    monkeypatch.setattr("agentbox.model.openai_compat.OpenAICompatClient", StubClient)
+    rewards._JUDGES.clear()
+    spec = RewardSpec(
+        name="llm_judge", params={"model": {"model": "judge", "base_url": "http://j"}}
+    )
+    ctx = RewardContext(task=_task(), verify=None, loop=None)
+    for _ in range(3):
+        _, parts = await compute_reward([spec], ctx)
+        assert parts["llm_judge"] == 0.8
+    assert len(created) == 1  # one HTTP client for every rollout on this loop

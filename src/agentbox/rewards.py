@@ -18,15 +18,19 @@ import asyncio
 import json
 import logging
 import re
+import weakref
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from agentbox.types import INVALID_TOOL_CALL
+
 if TYPE_CHECKING:
     from agentbox.agent.loop import AgentLoopResult
     from agentbox.config import AgentConfig
+    from agentbox.model.openai_compat import OpenAICompatClient
     from agentbox.tasks.schema import Task
     from agentbox.tasks.verifier import VerifyResult
 
@@ -187,7 +191,8 @@ def _valid_tool_calls() -> RewardFn:
         bad = sum(
             1
             for r in records
-            if r.result.startswith(("ERROR: unknown tool", "ERROR: invalid arguments"))
+            if r.name == INVALID_TOOL_CALL
+            or r.result.startswith(("ERROR: unknown tool", "ERROR: invalid arguments"))
         )
         return 1.0 - bad / len(records)
 
@@ -226,6 +231,23 @@ Final transcript excerpt:
 Reply with a JSON object: {{"score": <float between 0 and 1>, "reason": "<short>"}}."""
 
 
+# One judge client per (event loop, endpoint): rollouts share connections instead
+# of opening a new HTTP client per reward call.
+_JUDGES: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, OpenAICompatClient]] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _judge_client(cfg: Any) -> OpenAICompatClient:
+    from agentbox.model.openai_compat import OpenAICompatClient
+
+    clients = _JUDGES.setdefault(asyncio.get_running_loop(), {})
+    key = cfg.model_dump_json()
+    if key not in clients:
+        clients[key] = OpenAICompatClient(cfg)
+    return clients[key]
+
+
 @register_reward("llm_judge")
 def _llm_judge(
     model: dict[str, Any] | None = None,
@@ -236,12 +258,13 @@ def _llm_judge(
     if not model:
         raise ValueError("llm_judge requires params.model (a ModelConfig dict)")
 
+    from agentbox.config import ModelConfig
+
+    cfg = ModelConfig(**{"temperature": 0.0, "max_tokens": 256, **model})
+
     async def fn(ctx: RewardContext) -> float:
-        from agentbox.config import ModelConfig
-        from agentbox.model.openai_compat import OpenAICompatClient
         from agentbox.utils.text import truncate_middle
 
-        cfg = ModelConfig(**{"temperature": 0.0, "max_tokens": 256, **model})
         lines = []
         for m in ctx.loop.messages[2:] if ctx.loop else []:
             role = m.role.value if hasattr(m.role, "value") else m.role
@@ -260,8 +283,7 @@ def _llm_judge(
             transcript=truncate_middle("\n".join(lines), max_transcript_chars),
             rubric=rubric,
         )
-        async with OpenAICompatClient(cfg) as client:
-            resp = await client.complete([{"role": "user", "content": prompt}])
+        resp = await _judge_client(cfg).complete([{"role": "user", "content": prompt}])
         text = resp.content or ""
         found = re.search(r"\{.*\}", text, re.S)
         try:
