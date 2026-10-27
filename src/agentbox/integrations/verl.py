@@ -28,6 +28,7 @@ import os
 from collections.abc import Callable, Iterable
 from functools import lru_cache
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from agentbox.agent.prompts import render_system_prompt
@@ -96,6 +97,37 @@ def task_from_kwargs(kwargs: dict[str, Any]) -> Task:
     raise KeyError("dataset row has no extra_info.agentbox_task (or task_id + $AGENTBOX_TASKS)")
 
 
+class _SchemaView:
+    """Duck-typed stand-in for verl's ``OpenAIFunctionToolSchema`` (no validation)."""
+
+    def __init__(self, schema: dict[str, Any]) -> None:
+        self._schema = schema
+        fn = schema.get("function", {})
+        self.type = schema.get("type", "function")
+        self.function = SimpleNamespace(
+            name=fn.get("name"), description=fn.get("description"), parameters=fn.get("parameters")
+        )
+
+    def model_dump(self, **_: Any) -> dict[str, Any]:
+        return self._schema
+
+
+def _verl_tool(schema: dict[str, Any]) -> Any:
+    """What verl's loop reads from ``self.tools`` values: ``name`` and ``tool_schema``.
+
+    verl passes ``tool.tool_schema`` objects to its tool parsers and per-sample tool
+    selection; AgentBox executes the calls itself, so only the schema is needed.
+    """
+    tool_schema: Any
+    try:
+        from verl.tools.schemas import OpenAIFunctionToolSchema
+
+        tool_schema = OpenAIFunctionToolSchema.model_validate(schema)
+    except Exception:  # verl not installed, or a schema verl's model cannot express
+        tool_schema = _SchemaView(schema)
+    return SimpleNamespace(name=schema["function"]["name"], tool_schema=tool_schema)
+
+
 def build_agent_loop_class(
     base: type,
     *,
@@ -117,7 +149,7 @@ def build_agent_loop_class(
             self._agentbox = settings or load_settings()
             registry, _ = build_tools(self._agentbox.agent, None)
             self.tool_schemas = registry.openai_tools()
-            self.tools = {name: name for name in registry.names()}
+            self.tools = {s["function"]["name"]: _verl_tool(s) for s in self.tool_schemas}
 
         async def run(self, sampling_params: dict[str, Any], **kwargs: Any) -> Any:
             cfg = self._agentbox
@@ -165,7 +197,10 @@ def build_agent_loop_class(
             outcome = await env.call_tool(tool_call.name, tool_call.arguments)
             return make_response(outcome.message.content or ""), 0.0, {}
 
-    AgentBoxAgentLoop.__name__ = "AgentBoxAgentLoop"
+    # verl registers loops under f"{__module__}.{__qualname__}" and hydra re-imports
+    # that path in every agent-loop worker: it must not point inside this function
+    AgentBoxAgentLoop.__name__ = AgentBoxAgentLoop.__qualname__ = "AgentBoxAgentLoop"
+    AgentBoxAgentLoop.__module__ = __name__
     return AgentBoxAgentLoop
 
 
