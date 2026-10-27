@@ -20,10 +20,11 @@ wheels/
 .installed.cfg
 *.egg
 
-# Virtual envs
+# Virtual envs (root-anchored: on case-insensitive filesystems ENV/ also
+# matched the src/agentbox/env/ package)
 .venv/
-venv/
-ENV/
+/venv/
+/ENV/
 
 # Testing / typing
 .pytest_cache/
