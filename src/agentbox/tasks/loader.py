@@ -67,17 +67,21 @@ def iter_tasks(
     *,
     strict: bool = False,
     dedupe: bool = True,
+    split: str | None = None,
 ) -> Iterator[Task]:
     """Lazily yield tasks from dirs, ``*.json``, ``*.jsonl(.gz)`` or ``*.parquet``.
 
     Directories are scanned for task directories (``task.json`` + ``files/``)
     and loose task JSON files. Invalid entries raise with ``strict=True`` and
-    are logged otherwise; duplicate ``task_id`` values are reported.
+    are logged otherwise; duplicate ``task_id`` values are reported. ``split``
+    keeps only tasks whose ``split`` field matches.
     """
     sources = [source] if isinstance(source, (str, Path)) else list(source)
     seen: set[str] = set()
 
     def emit(task: Task) -> Iterator[Task]:
+        if split is not None and task.split != split:
+            return
         if dedupe and task.task_id in seen:
             logger.warning("duplicate task_id %r skipped", task.task_id)
             return

@@ -93,6 +93,9 @@ def run(
         bool, typer.Option("--compress/--no-compress", help="Write .jsonl.gz")
     ] = False,
     limit: Annotated[int | None, typer.Option("--limit", help="Only the first N tasks")] = None,
+    split: Annotated[
+        str | None, typer.Option("--split", help="Only tasks of this split (train|eval|test)")
+    ] = None,
     tools: Annotated[
         str | None, typer.Option("--tools", help="structured|extended|shell|custom")
     ] = None,
@@ -136,7 +139,7 @@ def run(
     st = state(ctx)
     proj = st.project
     try:
-        task_list = list(iter_tasks(tasks))
+        task_list = list(iter_tasks(tasks, split=split))
     except TaskValidationError as exc:
         fail(str(exc))
     if limit:
