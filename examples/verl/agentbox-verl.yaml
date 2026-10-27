@@ -1,10 +1,10 @@
-# AgentBox settings read by verl workers ($AGENTBOX_VERL_CONFIG)
+# AgentBox settings read by verl's agent-loop workers ($AGENTBOX_VERL_CONFIG)
 sandbox:
-  limits: {cpu_count: 1.0, memory_mb: 1024, network_disabled: true}
-  warm_pool: 8
+  limits: {cpu_count: 1.0, memory_mb: 512, network_disabled: true}
+  warm_pool: 8                      # pre-started containers per agent-loop worker
 agent:
-  tools: structured
-  max_steps: 16
+  tools: [list_files, read_file, write_file, run_tests]
+  episode_timeout_s: 600
+  tool_timeout_s: 60
 rewards:
-  - {name: verifier}
-  - {name: step_penalty, params: {per_step: 0.005}}
+  - {name: verifier}                # pytest_fraction partial credit comes from the tasks

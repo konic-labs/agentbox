@@ -11,7 +11,7 @@ or API key.
 | [`custom_tools_and_rewards.py`](custom_tools_and_rewards.py) | `@tool`, `BaseTool`, `ToolContext` and a registered reward component |
 | [`remote_env.py`](remote_env.py) | `agentbox serve` + `RemoteEnv` (needs `agentbox-rl[server]`) |
 | [`train_trl_grpo.py`](train_trl_grpo.py) | GRPO with TRL's `environment_factory` (needs `agentbox-rl[trl]` and a GPU) |
-| [`verl/`](verl) | Dataset preparation, agent-loop registration and a launch script for verl |
+| [`verl/`](verl) | A tested single-GPU GRPO recipe for verl: task generator, dataset preparation, agent-loop registration, worker settings and the launch script |
 | [`openrlhf/`](openrlhf) | Dataset preparation and a launch script for OpenRLHF's agent mode |
 | [`art_integration.py`](art_integration.py) | GRPO groups converted to ART's format (live `TrajectoryGroup`s with `agentbox-rl[art]`) |
 | [`bench_run.py`](bench_run.py) | The `coding-mini` benchmark suite with a scripted model |
