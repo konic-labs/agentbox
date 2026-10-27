@@ -36,6 +36,8 @@ jobs:
         run: mypy src
       - name: Reference docs up to date
         run: python scripts/gen_reference_docs.py --check
+      - name: Docs links and images
+        run: python scripts/check_docs.py
 
   unit:
     name: unit (py${{ matrix.python-version }})
