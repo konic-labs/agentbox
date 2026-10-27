@@ -21,6 +21,7 @@ from agentbox.config import RolloutConfig
 from agentbox.model.base import ModelClient
 from agentbox.runner.parallel import ParallelRunner
 from agentbox.trajectory.io import DirectorySink, iter_trajectories
+from agentbox.trajectory.schema import Trajectory
 from agentbox.version import __version__
 
 logger = logging.getLogger("agentbox.benchmark")
@@ -90,11 +91,20 @@ class BenchmarkRunner:
             seed=suite.manifest.seed,
         )
         builder = ReportBuilder(mut.model_id)
+        sink = DirectorySink(traj_dir) if cfg.save_trajectories else None
+        out_dir = Path(cfg.output_dir)
+
+        def report_path(traj: Trajectory) -> str | None:
+            # relative to the report, so a moved or copied results directory stays whole
+            if sink is None:
+                return None
+            return sink.path_for(traj).relative_to(out_dir).as_posix()
+
         skip: set[tuple[str, int]] | None = None
         if cfg.resume:
             skip = set()
             for traj in iter_trajectories(traj_dir):
-                builder.add(traj)
+                builder.add(traj, report_path(traj))
                 skip.add((traj.task_id, traj.sample_index))
             if skip:
                 logger.info("resume: %d rollouts already done for %s", len(skip), mut.model_id)
@@ -106,7 +116,6 @@ class BenchmarkRunner:
             agent=agent_cfg,
             sandbox=suite.manifest.sandbox,
         )
-        sink = DirectorySink(traj_dir) if cfg.save_trajectories else None
         t0 = time.monotonic()
         stream = runner.stream(
             suite.tasks,
@@ -117,11 +126,9 @@ class BenchmarkRunner:
         )
         try:
             async for traj in stream:
-                path = None
                 if sink is not None:
                     await sink.write(traj)
-                    path = str(sink.path_for(traj))
-                builder.add(traj, path)
+                builder.add(traj, report_path(traj))
                 if cfg.fail_fast and not traj.is_trainable:
                     logger.error(
                         "fail_fast: %s infra failure on %s: %s",

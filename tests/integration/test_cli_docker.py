@@ -82,6 +82,28 @@ def test_bench_create_and_mock_run(tmp_path: Path) -> None:
     assert "Benchmark Report" in r.stdout
 
 
+def test_bench_report_paths_survive_resume_and_moves(tmp_path: Path) -> None:
+    suite = tmp_path / "suite"
+    tasks = ROOT / "examples" / "benchmarks" / "coding-mini" / "tasks"
+    create = ["bench", "create", str(suite), "--from-tasks", str(tasks)]
+    assert runner.invoke(app, [*create, "--suite-id", "mini", "--name", "mini"]).exit_code == 0
+    out = tmp_path / "res"
+    run = ["--json", "bench", "run", str(suite), "--mock", "-o", str(out), "--no-progress"]
+    assert runner.invoke(app, [*run, "--limit", "2"]).exit_code == 0
+    r = runner.invoke(app, [*run, "--limit", "2", "--resume"])
+    assert r.exit_code == 0, r.stdout
+    moved = tmp_path / "archive" / "res"
+    moved.parent.mkdir()
+    out.rename(moved)
+    by_task = json.loads((moved / "report.json").read_text())["models"][0]["by_task"]
+    assert len(by_task) == 2
+    for task in by_task:
+        # every rollout, resumed or not, is listed relative to the report
+        assert len(task["trajectory_paths"]) == task["n"] > 0
+        for path in task["trajectory_paths"]:
+            assert not Path(path).is_absolute() and (moved / path).is_file()
+
+
 def test_sandbox_lifecycle_cli() -> None:
     task = ROOT / "examples" / "tasks" / "fix_fizzbuzz" / "task.json"
     r = runner.invoke(app, ["--json", "sandbox", "up", str(task)])

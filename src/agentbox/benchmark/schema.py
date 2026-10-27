@@ -139,7 +139,9 @@ class BenchmarkRunConfig(BaseModel):
 class TaskResult(BaseModel):
     task_id: str
     model_id: str
-    trajectory_paths: list[str] = Field(default_factory=list)
+    trajectory_paths: list[str] = Field(
+        default_factory=list, description="Trajectory files, relative to the report's directory."
+    )
     n: int = 0
     successes: int = 0
     pass_at_1: float = 0.0
