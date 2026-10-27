@@ -12,7 +12,13 @@ stack serves TRL, verl, OpenRLHF, SkyRL, ART and custom trainers. See
 - TRL `environment_factory` adapter + datasets; `agentbox train trl`;
   infrastructure failures return `None` (TRL's unscorable samples)
 - verl `AgentBoxAgentLoop` (ToolAgentLoop subclass) + parquet datasets;
-  zeroed response masks for infrastructure failures
+  zeroed response masks for infrastructure failures; works with verl 0.9.1
+  (verl tool objects, an importable registration target) (#99)
+- A tested single-GPU GRPO recipe for verl (`examples/verl/`): a task
+  generator, worker settings and the launch script for one 24 GB GPU and
+  15 GB of RAM (#102). The checkpoint save gives its memory back to the OS
+  (#103). In two 30-step runs of Qwen3-0.6B, held-out success rose from 48.6%
+  to 83.3% and 77.8%; see docs/integrations/verl.md
 - OpenRLHF agent executor running token-in/token-out on OpenRLHF's vLLM engine
 - SkyRL `skyrl_gym` text environment (Hermes protocol)
 - ART adapter: `to_art_dict` / `to_art_trajectory` / `to_art_groups`; trainable
@@ -37,6 +43,10 @@ stack serves TRL, verl, OpenRLHF, SkyRL, ART and custom trainers. See
 - Cached derived images (pytest once per image, setup-command snapshots),
   per-task environments, warm container pool, orphan-safe pruning,
   `keep_on_failure` that keeps only failures, interactive `agentbox sandbox`
+- Orphan reaper: an AgentBox process removes sandboxes whose owner process
+  on the same host has died, such as Ray workers stopped with SIGKILL. Kept
+  sandboxes are renamed `-kept` and survive. `AGENTBOX_REAP_ORPHANS=0` turns
+  the reaper off (#100)
 
 ### Agent, tools, models
 - Ordered tool execution (read-only calls may run concurrently), no dangling
@@ -77,6 +87,9 @@ stack serves TRL, verl, OpenRLHF, SkyRL, ART and custom trainers. See
 - Benchmarks: hash v2 over fairness-critical fields, streaming reports,
   resume, unbiased pass@k, paired comparison with bootstrap CI and sign test,
   `--fail-on-regression` CI gating
+- `bench create --tools/--max-steps/--episode-timeout`, starting from the
+  project's `agent:` section (#101); report trajectory paths are relative to
+  the report, resumed rollouts included (#104)
 - Generation: client reuse and cleanup, O(n) near-duplicate index, atomic
   resume state, concurrent validators
 
@@ -86,6 +99,11 @@ stack serves TRL, verl, OpenRLHF, SkyRL, ART and custom trainers. See
 - Every config field described; CLI and configuration references generated
   from code (`scripts/gen_reference_docs.py`)
 - Documentation rewritten for the new architecture, with integration guides
+- README and docs art drawn by `scripts/art/art.py` from the AgentBox release
+  film, with training charts built from the measured runs; `scripts/check_docs.py`
+  checks links, anchors and images in CI (#105)
+- The PyPI description points its images and links at the release's tag on
+  GitHub (#107)
 
 ## 0.2.0 — production hardening (lab)
 
