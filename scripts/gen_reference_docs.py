@@ -36,7 +36,7 @@ def hidden_commands() -> set[str]:
 
 def render_cli() -> str:
     raw = subprocess.run(
-        ["typer", "agentbox.cli.main", "utils", "docs", "--name", "agentbox"],
+        [sys.executable, "-m", "typer", "agentbox.cli.main", "utils", "docs", "--name", "agentbox"],
         check=True,
         capture_output=True,
         text=True,

@@ -821,6 +821,9 @@ $ agentbox bench [OPTIONS] COMMAND [ARGS]...
 
 Create a suite pack from tasks and freeze its content hash.
 
+The frozen agent starts from the project&#x27;s ``agent:`` section (without custom
+tools or tool dropout); ``--tools`` / ``--max-steps`` / ``--episode-timeout`` win.
+
 **Usage**:
 
 ```console
@@ -841,6 +844,9 @@ $ agentbox bench create [OPTIONS] {dest}
 * `--concurrency <int>`: [default: 8]
 * `--n <int>`: Rollouts per task  [default: 1]
 * `--network / --no-network`: [default: no-network]
+* `--tools <str>`: Frozen tool mode or comma-separated tool names
+* `--max-steps <int>`
+* `--episode-timeout <float>`
 * `--help`: Show this message and exit.
 
 ### `agentbox bench freeze`
