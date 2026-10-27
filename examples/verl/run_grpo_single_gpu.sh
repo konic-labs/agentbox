@@ -2,7 +2,7 @@
 # GRPO on ONE GPU with verl + AgentBox sandboxes: Qwen3-0.6B (thinking), full fine-tune.
 #
 # Tested with verl 0.9.1 (pip install "verl[vllm]==0.9.1"), torch 2.11 / CUDA 13, on
-# 1x L4 24 GB, 4 vCPU, 15 GB RAM. About 2.7 minutes per step (8 tasks x 8 samples).
+# 1x L4 24 GB, 4 vCPU, 15 GB RAM. About 2.5 minutes per step (8 tasks x 8 samples).
 #
 #   python examples/verl/make_coding_tasks.py data/tasks
 #   python examples/verl/prepare_data.py --out data/verl
@@ -14,6 +14,9 @@ export AGENTBOX_VERL_CONFIG=${AGENTBOX_VERL_CONFIG:-$HERE/agentbox-verl.yaml}
 export TOKENIZERS_PARALLELISM=false HYDRA_FULL_ERROR=1 PYTHONUNBUFFERED=1
 # small host: keep Ray lean, give its OOM killer headroom, avoid fragmentation
 export RAY_memory_usage_threshold=0.97 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+# a checkpoint save builds full fp32 state dicts on the CPU; a fixed mmap threshold makes
+# glibc hand that memory back afterwards instead of keeping ~2.5 GB in the worker's heap
+export MALLOC_MMAP_THRESHOLD_=1048576
 STEPS=${STEPS:-30}
 
 python -m verl.trainer.main_ppo \
