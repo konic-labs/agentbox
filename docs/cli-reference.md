@@ -743,6 +743,7 @@ $ agentbox traj export [OPTIONS] {source}
 * `--include-infra`: Keep infra failures
 * `--per-turn`: tokens: one row per turn
 * `--drop-zero-variance`: grpo
+* `--advantage <str>`: grpo: grpo|drgrpo|rloo advantages  [default: grpo]
 * `--min-margin <float>`: dpo  [default: 0.5]
 * `--push-to-hub <str>`: hf: repo id
 * `--help`: Show this message and exit.

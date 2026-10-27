@@ -96,6 +96,14 @@ def test_traj_commands(tmp_path: Path) -> None:
         app, ["traj", "export", str(src), "-f", "grpo", "-o", str(tmp_path / "g.jsonl")]
     )
     assert r.exit_code == 0 and "grpo" in r.stdout
+    out = tmp_path / "rloo.jsonl"
+    r = runner.invoke(
+        app, ["traj", "export", str(src), "-f", "grpo", "--advantage", "rloo", "-o", str(out)]
+    )
+    group = next(g for g in map(json.loads, out.read_text().splitlines()) if g["task_id"] == "a")
+    assert r.exit_code == 0 and group["advantages"] == [1.0, -1.0]  # leave-one-out baseline
+    r = runner.invoke(app, ["traj", "export", str(src), "-f", "grpo", "--advantage", "nope"])
+    assert r.exit_code == 2
     r = runner.invoke(app, ["--json", "traj", "diff", str(src), str(src)])
     assert json.loads(r.stdout)["first_divergent_tool_call"] is None
     r = runner.invoke(app, ["traj", "render", str(src), "-o", str(tmp_path / "d.html")])
