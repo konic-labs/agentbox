@@ -389,6 +389,8 @@ class SandboxManager:
                 continue
             if line.startswith(prefix):  # busybox fallback prints absolute paths
                 line = line[len(prefix) :]
+            elif line == abs_path:  # listing a file echoes its (absolute) path
+                line = relative_to_workspace(sandbox.workspace_dir, abs_path)
             entries.append(line)
             if len(entries) >= max_entries:
                 entries.append(f"... (truncated at {max_entries} entries)")
