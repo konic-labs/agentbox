@@ -49,8 +49,15 @@ class AgentLoopResult(BaseModel):
 class AgentHooks:
     """Override any subset to observe or steer the loop (GH #38)."""
 
-    async def before_model(self, step: int, messages: list[Message]) -> None:  # noqa: B027
-        """Called before each model request."""
+    async def before_model(
+        self, step: int, messages: list[Message]
+    ) -> Message | list[Message] | None:
+        """Called before each model request with a copy of the conversation.
+
+        Return a message (or a list) to append before the request, e.g. a user
+        nudge; it is sent to the model and recorded in the trajectory.
+        """
+        return None
 
     async def after_model(self, step: int, message: Message) -> None:  # noqa: B027
         """Called with every assistant message."""
@@ -212,7 +219,11 @@ class AgentLoop:
                         FinalStatus.TIMEOUT, StopReason.TIMEOUT, failure=FailureKind.POLICY
                     )
                 if self.hooks is not None:
-                    await self.hooks.before_model(step, convo.messages)
+                    injected = await self.hooks.before_model(step, list(convo.messages))
+                    if isinstance(injected, Message):
+                        injected = [injected]
+                    for extra in injected or ():
+                        convo.add(extra)
                 t0 = time.monotonic()
                 try:
                     response = await asyncio.wait_for(

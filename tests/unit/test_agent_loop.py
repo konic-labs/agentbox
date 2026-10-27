@@ -302,3 +302,33 @@ async def test_salvage_can_be_disabled_and_reports_malformed_calls() -> None:
     # the replayed call must stay valid JSON (native servers re-parse arguments)
     call = next(m for m in broken.messages if m.tool_calls).tool_calls[0]
     assert json.loads(call.function.arguments)["raw"].startswith("{oops")
+
+
+async def test_before_model_hook_injects_messages() -> None:
+    from agentbox.agent.loop import AgentHooks
+    from agentbox.trajectory.schema import Message
+    from agentbox.types import MessageRole
+
+    seen: list[list[dict[str, Any]]] = []
+
+    class Nudge(AgentHooks):
+        async def before_model(self, step: int, messages: list[Message]) -> Message | None:
+            messages.clear()  # a copy: mutating it must not break the episode
+            if step == 1:  # 0-based: the second model call, after the first tool result
+                return Message(role=MessageRole.USER, content="Remember to run the tests.")
+            return None
+
+    async def policy(messages: list[dict[str, Any]], tools: Any) -> ModelResponse:
+        seen.append(list(messages))  # the client gets the live payload: snapshot it
+        return turn(call("a", "list_files")) if len(seen) == 1 else done()
+
+    registry = build_tool_registry(ToolMode.STRUCTURED)
+    loop = AgentLoop(
+        FunctionModelClient(policy), ToolExecutor(registry), AgentConfig(), hooks=Nudge()
+    )
+    ctx = ToolContext(sandbox=FakeSandbox(), workspace_dir="/workspace", run_id="r", task_id="t")
+    result = await loop.run(system_prompt="sys", user_prompt="do", ctx=ctx)
+    assert seen[1][-1] == {"role": "user", "content": "Remember to run the tests."}
+    assert [m["role"] for m in seen[0]] == ["system", "user"]  # nothing injected at step 0
+    assert result.messages[-2].content == "Remember to run the tests."
+    assert result.stop_reason == "final_answer"
