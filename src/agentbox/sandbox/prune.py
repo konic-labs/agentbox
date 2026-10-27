@@ -3,7 +3,12 @@
 By default only *orphans* are removed: containers whose owning process (recorded
 in the ``agentbox.owner`` label as ``host:pid``) is gone on this host, or that are
 older than ``older_than_s``. Sandboxes of other running jobs are left alone
-(GH #22).
+(GH #22), and so are *kept* sandboxes (``keep_on_failure``, ``agentbox sandbox
+up``), which are renamed with a ``-kept`` suffix when kept.
+
+Processes killed without running exit handlers (Ray stops trainer workers with
+SIGKILL) leave their sandboxes behind; :func:`reap_orphans` runs once in the
+background when a process first uses the shared backend (GH #100).
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ from agentbox.sandbox.backend import DockerBackend, get_backend
 logger = logging.getLogger("agentbox.prune")
 
 PruneScope = Literal["orphans", "all"]
+KEPT_SUFFIX = "-kept"
 
 
 def _pid_alive(pid: int) -> bool:
@@ -54,6 +60,11 @@ def is_orphan(labels: dict[str, str], *, older_than_s: float | None = None) -> b
         return False
 
 
+def is_kept(container: dict[str, Any]) -> bool:
+    """Kept for debugging: renamed ``<name>-kept`` by ``SandboxManager.keep``."""
+    return any(str(n).endswith(KEPT_SUFFIX) for n in container.get("Names") or ())
+
+
 def select_containers(
     containers: list[dict[str, Any]],
     *,
@@ -68,9 +79,28 @@ def select_containers(
             continue
         if run_id is not None and labels.get("agentbox.run_id") != run_id:
             continue
-        if scope == "all" or run_id is not None or is_orphan(labels, older_than_s=older_than_s):
+        if scope == "all" or run_id is not None:
+            selected.append(c)
+        elif is_orphan(labels, older_than_s=older_than_s) and (
+            older_than_s is not None or not is_kept(c)
+        ):
             selected.append(c)
     return selected
+
+
+def reap_orphans(backend: DockerBackend) -> int:
+    """Remove containers of dead processes on this host (kept sandboxes excepted)."""
+    try:
+        containers = backend.list_containers_sync()
+    except Exception as exc:  # the daemon may be busy; the next process retries
+        logger.debug("orphan reaping skipped: %s", exc)
+        return 0
+    chosen = select_containers(containers, scope="orphans")
+    for c in chosen:
+        backend.remove_container_sync(str(c["Id"]))
+    if chosen:
+        logger.info("reaped %d sandbox(es) left by processes that are gone", len(chosen))
+    return len(chosen)
 
 
 def prune_agentbox_containers(

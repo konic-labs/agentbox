@@ -672,6 +672,21 @@ class DockerBackend:
         with self._live_guard:
             self._live.discard(cid)
 
+    def keep_container_sync(self, cid: str, name: str) -> str:
+        """Leave ``cid`` running after this process exits; returns its new name.
+
+        Kept containers are renamed ``<name>-kept`` so orphan reaping and
+        orphan pruning skip them.
+        """
+        self.forget_container(cid)
+        new = name if name.endswith("-kept") else f"{name[:58]}-kept"
+        try:
+            self.client.api.rename(cid, new)
+        except DockerException as exc:  # still kept, just not marked
+            logger.warning("could not mark %s as kept: %s", cid[:12], exc)
+            return name
+        return new
+
     def list_containers_sync(self, labels: list[str] | None = None) -> list[dict[str, Any]]:
         filters = {"label": ["agentbox=1", *(labels or [])]}
         return list(self.client.api.containers(all=True, filters=filters) or [])
@@ -949,14 +964,30 @@ def _close_quietly(stream: Any) -> None:
 _BACKENDS: weakref.WeakSet[DockerBackend] = weakref.WeakSet()
 _default_backend: DockerBackend | None = None
 _default_lock = threading.Lock()
+_reaped = False
 
 
 def get_backend() -> DockerBackend:
-    """Process-wide shared backend (created lazily, thread-safe)."""
-    global _default_backend
+    """Process-wide shared backend (created lazily, thread-safe).
+
+    The first backend of a process also removes, in the background, sandboxes
+    left behind by dead processes on this host (``AGENTBOX_REAP_ORPHANS=0``
+    disables it).
+    """
+    global _default_backend, _reaped
     with _default_lock:
         if _default_backend is None or _default_backend.closed:
             _default_backend = DockerBackend()
+            if not _reaped and os.environ.get("AGENTBOX_REAP_ORPHANS", "1") != "0":
+                _reaped = True
+                from agentbox.sandbox.prune import reap_orphans
+
+                threading.Thread(
+                    target=reap_orphans,
+                    args=(_default_backend,),
+                    name="agentbox-reaper",
+                    daemon=True,
+                ).start()
         return _default_backend
 
 

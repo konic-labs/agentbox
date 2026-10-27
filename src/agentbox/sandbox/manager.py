@@ -244,8 +244,12 @@ class SandboxManager:
         logger.debug("sandbox.destroyed id=%s", sandbox.id[:12])
 
     def keep(self, sandbox: Sandbox) -> None:
-        """Leave ``sandbox`` running after the process exits (debugging)."""
-        self.backend.forget_container(sandbox.id)
+        """Leave ``sandbox`` running after the process exits (debugging).
+
+        The container is renamed ``<name>-kept`` (``sandbox.name`` follows) so
+        automatic orphan reaping never removes it.
+        """
+        sandbox.name = self.backend.keep_container_sync(sandbox.id, sandbox.name)
 
     async def reset(self, sandbox: Sandbox) -> Sandbox:
         task_id, run_id, rollout_id = sandbox.task_id, sandbox.run_id, sandbox.rollout_id
