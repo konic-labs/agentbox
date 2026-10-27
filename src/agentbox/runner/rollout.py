@@ -275,6 +275,7 @@ async def _run(
         "created_at": created_at,
     }
     meta: dict[str, Any] = {"task_metadata": task.metadata, "tools_available": registry.names()}
+    built: list[Trajectory] = []
 
     def build(
         *,
@@ -291,7 +292,7 @@ async def _run(
         metrics.duration_s = time.monotonic() - t_start
         if loop is not None:
             loop_metrics(metrics, loop)
-        return Trajectory(
+        traj = Trajectory(
             **base,
             messages=messages if messages is not None else (loop.messages if loop else []),
             tool_call_records=loop.tool_call_records if loop else [],
@@ -306,6 +307,8 @@ async def _run(
             error=error,
             finished_at=datetime.now(UTC),
         )
+        built.append(traj)
+        return traj
 
     prov: Provisioned | None = None
     outcome: FinalStatus | None = None
@@ -409,3 +412,5 @@ async def _run(
                 sandbox_cfg.keep_on_failure and outcome != FinalStatus.SUCCESS
             )
             await release(prov, keep=keep)
+            if keep and built:  # `agentbox sandbox shell <name>` to inspect it
+                built[-1].metadata["kept_sandbox"] = prov.sandbox.name
