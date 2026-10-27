@@ -25,6 +25,8 @@ from agentbox.runner.rollout import Rollout
 from agentbox.tasks.schema import Task
 from agentbox.tito import ChatTokenizer, GenOutput, TitoModelClient
 
+PROVISION_ATTEMPTS = 3  # sandbox/seed failures before the first model call are retried
+
 
 def resolve_task(label: Any) -> Task:
     if isinstance(label, Task):
@@ -97,13 +99,14 @@ async def run_episode(
         max_context_tokens=max_length,
     )
     agent = cfg.agent.model_copy(update={"tool_protocol": "native"})
-    traj = await Rollout.run(
-        task,
-        model=client,
-        agent=agent,
-        sandbox=cfg.sandbox,
-        config=RolloutConfig(model=ModelConfig(model="tito"), agent=agent, rewards=cfg.rewards),
-    )
+    config = RolloutConfig(model=ModelConfig(model="tito"), agent=agent, rewards=cfg.rewards)
+    for _ in range(PROVISION_ATTEMPTS):
+        traj = await Rollout.run(
+            task, model=client, agent=agent, sandbox=cfg.sandbox, config=config
+        )
+        # retry only infrastructure failures that happened before anything was generated
+        if not (traj.failure_kind.is_infra and traj.metrics.model_calls == 0):
+            break
     trace = traj.token_trace()
     if trace is None or not trace.sequences:
         raise RuntimeError(f"episode produced no tokens ({traj.final_status.value}: {traj.error})")
@@ -134,6 +137,7 @@ async def run_episode(
         "scores": traj.reward,
         "extra_logs": {
             "agentbox_success": float(traj.success),
+            "agentbox_infra_failure": float(traj.failure_kind.is_infra),
             "agentbox_steps": float(traj.metrics.steps),
             "agentbox_tool_errors": float(traj.metrics.tool_errors),
             "agentbox_sequences": float(len(trace.sequences)),
