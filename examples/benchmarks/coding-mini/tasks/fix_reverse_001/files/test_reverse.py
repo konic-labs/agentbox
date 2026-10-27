@@ -1,9 +1,7 @@
 from reverse import reverse_string
 
-
 def test_hello():
-    assert reverse_string("hello") == "olleh"
-
+    assert reverse_string('hello') == 'olleh'
 
 def test_empty():
-    assert reverse_string("") == ""
+    assert reverse_string('') == ''

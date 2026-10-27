@@ -88,6 +88,8 @@ filterwarnings = ["ignore::DeprecationWarning:tests.*"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# task payloads are benchmark data: reformatting them changes suite content hashes
+extend-exclude = ["examples/benchmarks/*/tasks/*/files"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
