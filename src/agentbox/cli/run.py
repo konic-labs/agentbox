@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -201,12 +202,16 @@ def run(
         if tito:
             from agentbox.tito import ChatTokenizer, CompletionsGenerator, TitoModelClient
 
-            kwargs = (model_cfg.extra_body or {}).get("chat_template_kwargs")
+            body = dict(model_cfg.extra_body or {})
+            kwargs = body.pop("chat_template_kwargs", None)  # rendering, not a request field
             chat = ChatTokenizer.from_pretrained(tito, chat_template_kwargs=kwargs)
+            key_env = model_cfg.api_key_env
+            api_key = model_cfg.api_key or (os.environ.get(key_env) if key_env else None)
             gen = CompletionsGenerator(
                 model=model_cfg.model,
                 base_url=model_cfg.base_url or "http://localhost:8000/v1",
-                api_key=model_cfg.api_key or "EMPTY",
+                api_key=api_key or "EMPTY",
+                extra_body=body or None,
             )
             model_client = TitoModelClient(
                 chat,
@@ -214,6 +219,7 @@ def run(
                 model=model_cfg.model,
                 max_tokens=model_cfg.max_tokens or 1024,
                 temperature=model_cfg.temperature if model_cfg.temperature is not None else 1.0,
+                top_p=model_cfg.top_p if model_cfg.top_p is not None else 1.0,
             )
 
     config = RolloutConfig(
