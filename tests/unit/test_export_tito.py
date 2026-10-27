@@ -184,6 +184,59 @@ async def test_tito_client_keeps_one_prefix_consistent_sequence() -> None:
     assert t1 is not None
 
 
+@pytest.mark.parametrize("where", ["evaluate", "reset"])
+async def test_verl_infra_failures_are_never_trained(
+    monkeypatch: pytest.MonkeyPatch, where: str
+) -> None:
+    import agentbox.integrations.verl as verl_mod
+    from agentbox.runner.provision import ProvisionError
+
+    class FakeEnv:
+        def __init__(self, **kw: Any) -> None:
+            pass
+
+        async def reset(self, task: Task) -> None:
+            if where == "reset":
+                raise ProvisionError(FailureKind.SANDBOX, "docker went away")
+
+        async def call_tool(self, name: str, arguments: str) -> Any:
+            return SimpleNamespace(message=SimpleNamespace(content="ok"))
+
+        async def evaluate(self) -> Any:
+            return SimpleNamespace(
+                reward=0.0,
+                success=False,
+                final_status=FinalStatus.ERROR,
+                failure_kind=FailureKind.VERIFIER,
+                breakdown={},
+            )
+
+        async def close(self) -> None:
+            pass
+
+    class FakeBase:
+        def __init__(self, *a: Any, **k: Any) -> None:
+            pass
+
+        async def run(self, sampling_params: dict[str, Any], **kwargs: Any) -> Any:
+            text, _, _ = await self._call_tool(
+                SimpleNamespace(name="read_file", arguments="{}"), {}, None
+            )
+            return SimpleNamespace(
+                reward_score=None, response_mask=[1, 1, 0, 1], extra_fields={"tool": text}
+            )
+
+    monkeypatch.setattr(verl_mod, "AgentBoxEnv", FakeEnv)
+    loop = build_agent_loop_class(FakeBase, tool_response=lambda text: text)()
+    task = Task(task_id="t1", description="d", verifier=VerifierSpec(type=VerifierType.PYTEST))
+    out = await loop.run({}, extra_info=tasks_to_verl_rows([task])[0]["extra_info"])
+    assert out.response_mask == [0, 0, 0, 0]  # no gradient from an unscorable sample
+    assert out.reward_score == 0.0 and out.extra_fields["agentbox"]["infra_failure"] is True
+    if where == "reset":  # the batch survives; tools report the missing environment
+        assert out.extra_fields["agentbox"]["failure_kind"] == "sandbox"
+        assert "no AgentBox environment" in out.extra_fields["tool"]
+
+
 async def test_verl_agent_loop_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
     import agentbox.integrations.verl as verl_mod
 

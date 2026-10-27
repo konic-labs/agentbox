@@ -34,6 +34,7 @@ from agentbox.agent.prompts import render_system_prompt
 from agentbox.config import AgentConfig, SandboxConfig
 from agentbox.env.env import AgentBoxEnv
 from agentbox.rewards import RewardSpec
+from agentbox.runner.provision import ProvisionError
 from agentbox.runner.rollout import build_tools
 from agentbox.tasks.loader import iter_tasks
 from agentbox.tasks.schema import Task
@@ -121,20 +122,37 @@ def build_agent_loop_class(
         async def run(self, sampling_params: dict[str, Any], **kwargs: Any) -> Any:
             cfg = self._agentbox
             env = AgentBoxEnv(sandbox=cfg.sandbox, agent=cfg.agent, rewards=cfg.rewards)
-            await env.reset(task_from_kwargs(kwargs))
-            token = _ENV.set(env)
+            provision_error: ProvisionError | None = None
+            try:
+                await env.reset(task_from_kwargs(kwargs))
+            except ProvisionError as exc:  # keep the batch alive; the sample is unscorable
+                provision_error = exc
+            token = _ENV.set(env if provision_error is None else None)
             try:
                 output = await super().run(sampling_params, **kwargs)
-                result = await env.evaluate()
-                output.reward_score = result.reward
-                extra = getattr(output, "extra_fields", None)
-                if isinstance(extra, dict):
-                    extra["agentbox"] = {
+                if provision_error is None:
+                    result = await env.evaluate()
+                    info: dict[str, Any] = {
                         "success": result.success,
                         "status": result.final_status.value,
                         "failure_kind": result.failure_kind.value,
                         "reward_breakdown": result.breakdown,
                     }
+                    reward, infra = result.reward, result.failure_kind.is_infra
+                else:
+                    info = {
+                        "failure_kind": provision_error.kind.value,
+                        "error": str(provision_error),
+                    }
+                    reward, infra = 0.0, True
+                output.reward_score = reward
+                if infra:
+                    # verl has no "unscorable" sample: at least never train on its tokens
+                    output.response_mask = [0] * len(output.response_mask)
+                info["infra_failure"] = infra
+                extra = getattr(output, "extra_fields", None)
+                if isinstance(extra, dict):
+                    extra["agentbox"] = info
                 return output
             finally:
                 _ENV.reset(token)

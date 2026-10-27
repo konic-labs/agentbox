@@ -116,6 +116,15 @@ def test_trl_environment_factory_sync() -> None:
     assert "path" in schema["function"]["parameters"]["properties"]
 
 
+def test_trl_infra_failures_are_unscorable() -> None:
+    broken = TASK.model_copy(update={"task_id": "broken", "setup_commands": ["exit 7"]})
+    Env = make_environment_factory([broken], sandbox=SANDBOX, tools=["read_file"])
+    env = Env()
+    assert env.reset(task_id="broken") is not None  # no exception: TRL's batch survives
+    assert "environment is unavailable" in env.read_file("calc.py")
+    assert env.get_reward() is None  # TRL drops it from the group baseline
+
+
 def test_skyrl_core_text_episode() -> None:
     core = AgentBoxTextEnvCore(TASK, settings=Settings(sandbox=SANDBOX))
     messages, meta = core.init(None)

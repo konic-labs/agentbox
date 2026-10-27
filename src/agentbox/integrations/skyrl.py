@@ -18,7 +18,10 @@ from typing import Any
 
 from agentbox.env.env import SyncAgentBoxEnv
 from agentbox.integrations.verl import Settings, load_settings, task_from_kwargs
+from agentbox.runner.provision import ProvisionError
 from agentbox.tasks.schema import Task
+
+PROVISION_ATTEMPTS = 3
 
 
 class AgentBoxTextEnvCore:
@@ -35,7 +38,13 @@ class AgentBoxTextEnvCore:
         self.max_turns = agent.max_steps
 
     def init(self, prompt: Any = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        obs = self.env.reset(self.task)
+        for attempt in range(PROVISION_ATTEMPTS):
+            try:
+                obs = self.env.reset(self.task)
+                break
+            except ProvisionError:  # transient Docker trouble should not kill the run
+                if attempt == PROVISION_ATTEMPTS - 1:
+                    raise
         return obs.messages, {
             "task_id": self.task.task_id,
             "tools": [t["function"]["name"] for t in obs.tools],

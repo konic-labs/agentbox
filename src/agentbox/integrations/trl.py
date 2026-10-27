@@ -20,6 +20,7 @@ AgentBox sandboxes::
 from __future__ import annotations
 
 import itertools
+import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -28,11 +29,14 @@ from agentbox.agent.prompts import render_system_prompt
 from agentbox.config import AgentConfig, SandboxConfig
 from agentbox.env.env import SyncAgentBoxEnv
 from agentbox.rewards import RewardSpec
+from agentbox.runner.provision import ProvisionError
 from agentbox.tasks.loader import iter_tasks
 from agentbox.tasks.schema import Task
 from agentbox.trajectory.schema import Trajectory
 from agentbox.types import ToolMode
 from agentbox.utils.aio import BackgroundLoop
+
+logger = logging.getLogger("agentbox.integrations.trl")
 
 
 # ---------------------------------------------------------------- tool methods
@@ -191,6 +195,7 @@ class _TRLEnvBase:
     _rewards: list[RewardSpec] | None = None
     _loop: BackgroundLoop | None = None
     _cycle: Any = None
+    _provision_retries: int = 1
 
     def __init__(self) -> None:
         self._env = SyncAgentBoxEnv(
@@ -200,10 +205,13 @@ class _TRLEnvBase:
             loop=type(self)._loop,
         )
         self._active = False
-        self.reward = 0.0
+        self._infra_error: str | None = None
+        self.reward: float | None = 0.0
         self.last_trajectory: Trajectory | None = None
 
     def _tool(self, name: str, **kwargs: Any) -> str:
+        if self._infra_error is not None:
+            return f"ERROR: the environment is unavailable ({self._infra_error})"
         if not self._active:
             return "ERROR: environment not reset"
         args = {k: v for k, v in kwargs.items() if v is not None}
@@ -220,23 +228,44 @@ class _TRLEnvBase:
         """
         if self._active:
             self._env.close()
+            self._active = False
         cls = type(self)
         if task_id is None:
             task_id = next(cls._cycle)
         task = cls._tasks[str(task_id)]
-        obs = self._env.reset(task)
-        self._active = True
+        self._infra_error = None
         self.reward = 0.0
-        return None if kwargs.get("prompt") else obs.prompt
+        for attempt in range(cls._provision_retries + 1):
+            try:
+                self._env.reset(task)
+                break
+            except ProvisionError as exc:  # infrastructure, not the policy's fault
+                logger.warning("provisioning %s failed (attempt %d): %s", task_id, attempt + 1, exc)
+                self._infra_error = f"{exc.kind.value}: {exc}"
+        else:
+            self.reward = None  # unscorable: TRL leaves it out of the group baseline
+            return None if kwargs.get("prompt") else task.prompt_text()
+        self._infra_error = None
+        self._active = True
+        return None if kwargs.get("prompt") else task.prompt_text()
 
-    def get_reward(self) -> float:
-        """Verify the sandbox state, compute the reward and release the sandbox."""
+    def get_reward(self) -> float | None:
+        """Verify the sandbox state, compute the reward and release the sandbox.
+
+        Infrastructure failures (sandbox, seeding, verifier crash) return
+        ``None``: TRL then treats the completion as unscorable (excluded from the
+        group baseline, zero advantage) instead of training on a fake 0.
+        """
         if not self._active:
             return self.reward
         try:
             result = self._env.evaluate()
-            self.reward = float(result.reward)
             self.last_trajectory = self._env.trajectory()
+            if result.failure_kind.is_infra:
+                logger.warning("unscorable episode (%s): %s", result.failure_kind, result.error)
+                self.reward = None
+            else:
+                self.reward = float(result.reward)
         finally:
             self._env.close()
             self._active = False
