@@ -103,6 +103,7 @@ select = ["E", "F", "I", "UP", "B"]
 "src/agentbox/cli/train.py" = ["E501"]  # script template
 "src/agentbox/integrations/openrlhf.py" = ["E501"]  # shell example in docstring
 "tests/**" = ["E501"]  # long literal test data
+"scripts/art/art.py" = ["E501"]  # SVG markup and alt text
 
 [tool.mypy]
 python_version = "3.11"
