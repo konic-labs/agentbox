@@ -27,7 +27,11 @@ from agentbox.cli._common import (
 
 
 def _reward_specs(values: list[str] | None) -> Any:
-    """``--reward name[:weight][,k=v...]`` e.g. ``step_penalty:1,per_step=0.01``."""
+    """``--reward name[:weight][,k=v...]`` e.g. ``step_penalty:1,per_step=0.01``.
+
+    ``name`` may be a ``package.module:function`` path; only a trailing numeric
+    ``:suffix`` is a weight.
+    """
     from agentbox.rewards import RewardSpec
 
     if not values:
@@ -35,7 +39,9 @@ def _reward_specs(values: list[str] | None) -> Any:
     specs = []
     for raw in values:
         head, *params = raw.split(",")
-        name, _, weight = head.partition(":")
+        name, sep, weight = head.rpartition(":")
+        if not sep or not _is_number(weight):
+            name, weight = head, ""
         kv = parse_kv(params, what="reward param")
         specs.append(
             RewardSpec(
@@ -45,6 +51,14 @@ def _reward_specs(values: list[str] | None) -> Any:
             )
         )
     return specs
+
+
+def _is_number(v: str) -> bool:
+    try:
+        float(v)
+    except ValueError:
+        return False
+    return True
 
 
 def _coerce(v: str) -> Any:
