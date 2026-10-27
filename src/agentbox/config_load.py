@@ -47,38 +47,56 @@ class EndpointConfig(ModelConfig):
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str | None = None
-    timeout_s: float = 180.0
+    id: str | None = Field(default=None, description="Profile id (students list form).")
+    timeout_s: float = Field(default=180.0, description="Per-request timeout.")
 
     def to_model_config(self) -> ModelConfig:
         return ModelConfig.model_validate(self.model_dump(exclude={"id"}))
 
 
 class GenerateSection(BaseModel):
+    """Defaults for `agentbox generate` (flags override them)."""
+
     model_config = ConfigDict(extra="forbid")
 
-    concurrency: int = 8
-    docker_concurrency: int = 8
-    llm_judge: bool = True
-    min_score: float = 0.65
-    use_dspy: bool = False
-    target: int = 20
-    max_tokens: int = 8192
+    concurrency: int = Field(default=8, description="Concurrent teacher generations.")
+    docker_concurrency: int = Field(default=8, description="Concurrent Docker QC sandboxes.")
+    llm_judge: bool = Field(default=True, description="Score tasks with an LLM judge.")
+    min_score: float = Field(default=0.65, description="Minimum judge score to accept a task.")
+    use_dspy: bool = Field(default=False, description="Generate through DSPy signatures.")
+    target: int = Field(default=20, description="Accepted tasks `generate batch` aims for.")
+    max_tokens: int = Field(default=8192, description="Teacher completion budget.")
 
 
 class ProjectConfig(BaseModel):
+    """`agentbox.yaml`: model profiles plus sandbox/agent/reward/generation defaults."""
+
     model_config = ConfigDict(extra="forbid")
 
-    default_model: str | None = None
-    models: dict[str, EndpointConfig] = Field(default_factory=dict)
-    sandbox: SandboxConfig | None = None
-    agent: AgentConfig | None = None
-    rewards: list[RewardSpec] | None = None
-    teacher: EndpointConfig | None = None
-    students: list[EndpointConfig] = Field(default_factory=list)
-    generate: GenerateSection = Field(default_factory=GenerateSection)
-    extra: dict[str, Any] = Field(default_factory=dict)
-    path: Path | None = None
+    default_model: str | None = Field(
+        default=None, description="Profile used when no --profile / --model is given."
+    )
+    models: dict[str, EndpointConfig] = Field(
+        default_factory=dict, description="Named model profiles (ModelConfig fields)."
+    )
+    sandbox: SandboxConfig | None = Field(default=None, description="Sandbox defaults.")
+    agent: AgentConfig | None = Field(default=None, description="Agent loop defaults.")
+    rewards: list[RewardSpec] | None = Field(
+        default=None, description="Reward components (default: verifier + agent penalties)."
+    )
+    teacher: EndpointConfig | None = Field(
+        default=None, description="Model that generates and judges tasks."
+    )
+    students: list[EndpointConfig] = Field(
+        default_factory=list, description="Models benchmarked by `bench run` without --model."
+    )
+    generate: GenerateSection = Field(
+        default_factory=GenerateSection, description="Task generation defaults."
+    )
+    extra: dict[str, Any] = Field(
+        default_factory=dict, description="Unknown top-level keys, kept for tools and plugins."
+    )
+    path: Path | None = Field(default=None, description="File the config was loaded from.")
 
     def model(self, name: str | None = None) -> ModelConfig:
         """Resolve a model profile (``None`` -> ``default_model``)."""

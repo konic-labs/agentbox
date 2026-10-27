@@ -52,9 +52,13 @@ class RewardContext:
 
 
 class RewardSpec(BaseModel):
-    name: str
-    weight: float = 1.0
-    params: dict[str, Any] = Field(default_factory=dict)
+    """One weighted reward component; the rollout reward is the weighted sum."""
+
+    name: str = Field(description="Registered reward name, or 'module:function' / 'module.fn'.")
+    weight: float = Field(default=1.0, description="Multiplier applied to the component.")
+    params: dict[str, Any] = Field(
+        default_factory=dict, description="Keyword arguments for the reward factory."
+    )
 
 
 _REGISTRY: dict[str, Callable[..., RewardFn]] = {}

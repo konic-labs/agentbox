@@ -30,13 +30,19 @@ RewardMode = Literal["binary", "pytest_fraction", "stdout", "custom"]
 class VerifierSpec(BaseModel):
     """How the outcome of an episode is measured (ground truth for reward)."""
 
-    type: VerifierType = VerifierType.COMMAND
-    command: str | None = None
-    path: str | None = None
-    success_exit_code: int = 0
-    timeout_s: float = 60.0
-    reward_success: float = 1.0
-    reward_failure: float = 0.0
+    type: VerifierType = Field(
+        default=VerifierType.COMMAND, description="pytest | command | custom (test/shell aliases)."
+    )
+    command: str | None = Field(
+        default=None, description="Shell command run in the workspace (pytest: default pytest -q)."
+    )
+    path: str | None = Field(
+        default=None, description="pytest only: test path when no command is given."
+    )
+    success_exit_code: int = Field(default=0, description="Exit code that counts as success.")
+    timeout_s: float = Field(default=60.0, description="Verifier command timeout.")
+    reward_success: float = Field(default=1.0, description="Reward on success (binary mode).")
+    reward_failure: float = Field(default=0.0, description="Reward on failure (binary mode).")
     reward_mode: RewardMode = Field(
         default="binary",
         description=(
@@ -52,8 +58,12 @@ class VerifierSpec(BaseModel):
     success_threshold: float | None = Field(
         default=None, description="If set, success means reward >= threshold"
     )
-    env: dict[str, str] = Field(default_factory=dict)
-    workdir: str | None = None
+    env: dict[str, str] = Field(
+        default_factory=dict, description="Extra environment for the verifier command."
+    )
+    workdir: str | None = Field(
+        default=None, description="cwd for the verifier (default: workspace)."
+    )
     pre_commands: list[str] = Field(
         default_factory=list, description="Run before the verifier command (not scored)"
     )
@@ -70,7 +80,10 @@ class VerifierSpec(BaseModel):
         default_factory=list,
         description="Globs (e.g. PYTEST_TAMPER_FILES) the agent may not create; deleted + flagged",
     )
-    on_tamper: Literal["fail", "flag"] = "fail"
+    on_tamper: Literal["fail", "flag"] = Field(
+        default="fail",
+        description="fail: tampering scores tamper_reward and is not a success; flag: record only.",
+    )
     tamper_reward: float | None = Field(
         default=None, description="Reward when tampering is detected (default reward_failure)"
     )
@@ -103,39 +116,63 @@ class VerifierSpec(BaseModel):
 class EnvironmentSpec(BaseModel):
     """Per-task sandbox overrides merged over the run's SandboxConfig (GH #25)."""
 
-    image: str | None = None
-    env: dict[str, str] = Field(default_factory=dict)
-    network: bool | None = None
-    cpu_count: float | None = None
-    memory_mb: int | None = None
-    working_dir: str | None = None
-    ensure_pytest: bool | None = None
+    image: str | None = Field(default=None, description="Image for this task's sandboxes.")
+    env: dict[str, str] = Field(
+        default_factory=dict, description="Environment merged over SandboxConfig.env."
+    )
+    network: bool | None = Field(default=None, description="Allow network for this task.")
+    cpu_count: float | None = Field(default=None, description="CPU limit override.")
+    memory_mb: int | None = Field(default=None, description="Memory limit override (MiB).")
+    working_dir: str | None = Field(
+        default=None, description="Workspace and cwd for this task's sandboxes."
+    )
+    ensure_pytest: bool | None = Field(default=None, description="Override ensure_pytest.")
 
 
 class Task(BaseModel):
     """Complete task definition for sandbox seeding and agent rollout."""
 
-    task_id: str
-    description: str
+    task_id: str = Field(description="Unique id (used in file and container names).")
+    description: str = Field(description="What the agent must do (the default user prompt).")
     prompt: str | None = Field(
         default=None,
         description="User prompt template; {description} and {files} are substituted",
     )
-    starter_files: dict[str, str] = Field(default_factory=dict)
+    starter_files: dict[str, str] = Field(
+        default_factory=dict, description="Workspace-relative path -> text content."
+    )
     binary_files: dict[str, str] = Field(
         default_factory=dict, description="path -> base64 content for non-text starter files"
     )
-    setup_commands: list[str] = Field(default_factory=list)
-    verifier: VerifierSpec
-    environment: EnvironmentSpec | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    system_prompt_extra: str | None = None
-    allowed_tools: list[str] | None = None
-    max_steps: int | None = None
-    episode_timeout_s: float | None = None
-    split: Literal["train", "eval", "test"] | None = None
-    group_key: str | None = None
-    version: str | None = None
+    setup_commands: list[str] = Field(
+        default_factory=list,
+        description="Run after seeding, before the agent (snapshotted into cached images).",
+    )
+    verifier: VerifierSpec = Field(description="How the outcome is measured.")
+    environment: EnvironmentSpec | None = Field(
+        default=None, description="Per-task sandbox overrides."
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Free-form; copied into trajectories."
+    )
+    system_prompt_extra: str | None = Field(
+        default=None, description="Appended to the system prompt."
+    )
+    allowed_tools: list[str] | None = Field(
+        default=None, description="Restrict the tool set for this task."
+    )
+    max_steps: int | None = Field(default=None, description="Override AgentConfig.max_steps.")
+    episode_timeout_s: float | None = Field(
+        default=None, description="Override AgentConfig.episode_timeout_s."
+    )
+    split: Literal["train", "eval", "test"] | None = Field(
+        default=None, description="Dataset split (iter_tasks(split=...), `run --split`)."
+    )
+    group_key: str | None = Field(
+        default=None,
+        description="Label shared by variants of one problem; copied into trajectories.",
+    )
+    version: str | None = Field(default=None, description="Task revision (part of task_hash).")
 
     def prompt_text(self) -> str:
         """The user message shown to the agent."""
