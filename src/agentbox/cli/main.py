@@ -320,7 +320,10 @@ def config_show(ctx: typer.Context) -> None:
 
 
 @config_app.command("validate")
-def config_validate(ctx: typer.Context) -> None:
+def config_validate(
+    ctx: typer.Context,
+    strict: Annotated[bool, typer.Option("--strict", help="Unknown keys are errors")] = False,
+) -> None:
     """Validate the project configuration (exit 2 on errors)."""
     st = state(ctx)
     from agentbox.config_load import load_project_config
@@ -329,13 +332,29 @@ def config_validate(ctx: typer.Context) -> None:
         cfg = load_project_config(st.config_path, required=True)
     except Exception as exc:
         fail(str(exc), code=EXIT_USAGE)
+    unknown = sorted(cfg.extra)
+    ok = not (strict and unknown)
+
+    def human() -> None:
+        if unknown:
+            typer.secho(f"unknown top-level keys (ignored): {unknown}", fg=typer.colors.YELLOW)
+        typer.secho(
+            f"{'ok' if ok else 'invalid'}: {cfg.path} ({len(cfg.all_models())} model profiles)",
+            fg=typer.colors.GREEN if ok else typer.colors.RED,
+        )
+
     emit(
         st,
-        {"ok": True, "path": str(cfg.path), "profiles": sorted(cfg.all_models())},
-        lambda: typer.secho(
-            f"ok: {cfg.path} ({len(cfg.all_models())} model profiles)", fg=typer.colors.GREEN
-        ),
+        {
+            "ok": ok,
+            "path": str(cfg.path),
+            "profiles": sorted(cfg.all_models()),
+            "unknown_keys": unknown,
+        },
+        human,
     )
+    if not ok:
+        raise typer.Exit(EXIT_USAGE)
 
 
 @config_app.command("path")
