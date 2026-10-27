@@ -2,16 +2,22 @@
 
 AgentBox no longer depends on ART; this module converts trajectories into ART's
 ``Trajectory`` / ``TrajectoryGroup`` shapes when ``openpipe-art`` is installed.
+
+ART trains on assistant turns given as OpenAI ``Choice`` objects with logprobs
+(plain assistant dicts only with ``allow_training_without_logprobs``). When a
+rollout captured token ids + logprobs (``ModelConfig.capture_tokens`` and
+``capture_logprobs``), each assistant turn becomes such a ``Choice`` whose
+logprob tokens use vLLM's ``token_id:<id>`` form, so ART re-tokenizes nothing.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, Literal
 
-from agentbox.trajectory.schema import Trajectory
-from agentbox.types import FinalStatus
+from agentbox.trajectory.schema import Message, Trajectory
+from agentbox.types import FinalStatus, MessageRole
 
 _SCALARS = (str, int, float, bool, type(None))
 
@@ -23,14 +29,79 @@ def _scalar(value: Any) -> Any:
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
+FinishReason = Literal["stop", "length", "tool_calls", "content_filter", "function_call"]
+_FINISH_REASONS: dict[str, FinishReason] = {
+    "stop": "stop",
+    "length": "length",
+    "tool_calls": "tool_calls",
+    "content_filter": "content_filter",
+    "function_call": "function_call",
+}
+
+
+def art_choice(message: Message) -> Any | None:
+    """OpenAI ``Choice`` for an assistant turn with complete token logprobs, else None."""
+    tok = message.tokens
+    if (
+        message.role != MessageRole.ASSISTANT
+        or tok is None
+        or tok.logprobs is None
+        or len(tok.logprobs) != len(tok.completion_ids)
+        or not tok.completion_ids
+    ):
+        return None
+    from openai.types.chat import ChatCompletionMessage, ChatCompletionTokenLogprob
+    from openai.types.chat.chat_completion import Choice, ChoiceLogprobs
+
+    wire = message.to_openai_dict(include_reasoning=False)
+    finish = _FINISH_REASONS.get(
+        message.finish_reason or "", "tool_calls" if message.tool_calls else "stop"
+    )
+    return Choice(
+        index=0,
+        finish_reason=finish,
+        message=ChatCompletionMessage.model_validate(
+            {
+                "role": "assistant",
+                "content": wire.get("content"),
+                "tool_calls": wire.get("tool_calls") or None,
+            }
+        ),
+        logprobs=ChoiceLogprobs(
+            content=[
+                ChatCompletionTokenLogprob(
+                    token=f"token_id:{tid}", logprob=lp, bytes=None, top_logprobs=[]
+                )
+                for tid, lp in zip(tok.completion_ids, tok.logprobs, strict=True)
+            ]
+        ),
+    )
+
+
+def _messages_and_choices(traj: Trajectory, *, choices: bool, as_dicts: bool) -> list[Any]:
+    out: list[Any] = []
+    for m in traj.messages:
+        choice = art_choice(m) if choices else None
+        if choice is None:
+            out.append(m.to_openai_dict(include_reasoning=True))
+        else:
+            out.append(choice.model_dump(mode="json", exclude_none=True) if as_dicts else choice)
+    return out
+
+
 def to_art_dict(
     traj: Trajectory,
     *,
     tools: list[dict[str, Any]] | None = None,
     scalar_metadata: bool = True,
+    choices: bool = True,
 ) -> dict[str, Any]:
-    """Portable dict in ART ``Trajectory`` shape."""
-    messages_and_choices = [m.to_openai_dict(include_reasoning=True) for m in traj.messages]
+    """Portable dict in ART ``Trajectory`` shape.
+
+    With ``choices`` (default), assistant turns that carry token logprobs are
+    serialised ``Choice`` objects (trainable by ART); other turns stay messages.
+    """
+    messages_and_choices = _messages_and_choices(traj, choices=choices, as_dicts=True)
     if traj.verify is not None:
         correct = 1.0 if traj.verify.success else 0.0
     else:
@@ -91,12 +162,12 @@ def _art() -> Any:
     return art
 
 
-def to_art_trajectory(traj: Trajectory) -> Any:
-    """A live ``art.Trajectory``."""
+def to_art_trajectory(traj: Trajectory, *, choices: bool = True) -> Any:
+    """A live ``art.Trajectory`` (``Choice`` objects for turns with token logprobs)."""
     art = _art()
-    data = to_art_dict(traj)
+    data = to_art_dict(traj, choices=False)
     return art.Trajectory(
-        messages_and_choices=data["messages_and_choices"],
+        messages_and_choices=_messages_and_choices(traj, choices=choices, as_dicts=False),
         tools=data.get("tools"),
         reward=data["reward"],
         metrics=data["metrics"],
