@@ -29,11 +29,13 @@ jobs:
           cache: pip
       - run: pip install -e ".[dev]"
       - name: ruff check
-        run: ruff check src tests examples
+        run: ruff check src tests examples scripts
       - name: ruff format
-        run: ruff format --check src tests examples
+        run: ruff format --check src tests examples scripts
       - name: mypy --strict
         run: mypy src
+      - name: Reference docs up to date
+        run: python scripts/gen_reference_docs.py --check
 
   unit:
     name: unit (py${{ matrix.python-version }})
