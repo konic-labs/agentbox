@@ -1,167 +1,137 @@
 # Configuration
 
-All primary knobs are Pydantic v2 models in `agentbox.config`.
+Configuration has two layers that share one set of models:
 
-## Project file (`agentbox.yaml`)
+- **`agentbox.yaml`** (the *project file*) is read by every CLI command and by
+  `agentbox serve`.
+- **Python objects** (`SandboxConfig`, `ModelConfig`, `AgentConfig`,
+  `RolloutConfig`, `RewardSpec`) are what the runner, the environment API and
+  the trainer integrations accept.
 
-Optional repo-root config loaded via `agentbox.config_load.load_project_config()`.
+Every field, default and description is listed in the generated
+[configuration reference](config-reference.md).
+
+## The project file
 
 ```yaml
-teacher:
-  model: Qwen/…
-  base_url: http://localhost:8000/v1
-  api_key: EMPTY
-  max_tokens: 8192
-generate:
-  concurrency: 8
-  target: 20
-  llm_judge: true
-  min_score: 0.65
-students:
-  - id: local-small
-    model: qwen3.5:0.8b
-    base_url: http://localhost:11434/v1
+# agentbox.yaml
+default_model: local                 # used when no --profile/--model is given
+
+models:                              # named profiles (ModelConfig fields)
+  local:
+    model: qwen3-1.7b
+    base_url: http://localhost:8000/v1
+    api_key: ${VLLM_API_KEY:-EMPTY}
+    temperature: 1.0
+    capture_tokens: true
+    capture_logprobs: true
+    extra_body: {chat_template_kwargs: {enable_thinking: false}}
+  gpt:
+    model: gpt-4.1-mini
+    api_key_env: OPENAI_API_KEY      # read at request time; never stored in trajectories
+
+sandbox:                             # SandboxConfig
+  image: python:3.12-slim-bookworm
+  limits: {cpu_count: 1.0, memory_mb: 1024, pids_limit: 256, network_disabled: true}
+  warm_pool: 4
+  cache_setup: true
+
+agent:                               # AgentConfig
+  tools: structured                  # structured | extended | shell | custom | [names]
+  max_steps: 30
+  episode_timeout_s: 600
+  tool_protocol: native              # or hermes for servers without tool parsing
+
+rewards:                             # weighted components; default: verifier + agent penalties
+  - {name: verifier}
+  - {name: step_penalty, params: {per_step: 0.01}}
+
+teacher:                             # task generation and LLM judging
+  model: glm-5.2
+  base_url: https://api.example.com/v1
+  api_key_env: TEACHER_API_KEY
+students:                            # models `bench run` evaluates without --model
+  - {id: qwen-1.7b, model: qwen3-1.7b, base_url: http://localhost:8000/v1}
+generate: {concurrency: 8, target: 50, min_score: 0.7}
 ```
 
-- Env interpolation: `${VAR}`
-- Discovery: `AGENTBOX_CONFIG` or walk from CWD for `agentbox.yaml` / `.yml` / `.toml` / `.json`
-- Example: `examples/agentbox.yaml`
+### Where it is found
 
-Used by `agentbox generate` (teacher defaults) and `agentbox bench run` (students when no model flags).
+1. `--config/-C PATH` on the command line.
+2. `$AGENTBOX_CONFIG` (an error if it points to a missing file).
+3. The first `agentbox.yaml`, `agentbox.yml`, `agentbox.toml` or `agentbox.json`
+   in the current directory or any parent directory.
 
-## ResourceLimits
+With no file, defaults apply, so the CLI works without configuration.
 
-| Field | Default | Meaning |
-| --- | --- | --- |
-| `cpu_count` | `1.0` | Docker `nano_cpus = cpu_count * 1e9` |
-| `memory_mb` | `512` | Memory hard limit |
-| `pids_limit` | `256` | Process count cap |
-| `network_disabled` | `True` | No container network (`network_mode=none`) |
-| `memswap_mb` | `None` | Defaults to `memory_mb` (no extra swap) |
+### Environment interpolation
 
-## SandboxConfig
+String values may reference environment variables:
 
-| Field | Default | Meaning |
-| --- | --- | --- |
-| `image` | `python:3.12-slim-bookworm` | Docker image |
-| `workspace_dir` | `/workspace` | Jail root for files |
-| `working_dir` | `/workspace` | `docker exec` workdir |
-| `env` | `{}` | Extra environment variables |
-| `limits` | `ResourceLimits()` | Resource / network policy |
-| `auto_pull` | `True` | Pull image if missing |
-| `auto_remove` | `True` | Remove container on destroy |
-| `keep_on_failure` | `False` | Leave container for debugging |
-| `labels` | `{}` | Extra Docker labels |
-| `command` | `["sleep", "infinity"]` | Keep container alive for exec |
-| `ensure_pytest` | `True` | Try to install pytest if missing |
+| Syntax | Meaning |
+| --- | --- |
+| `${NAME}` | The value of `NAME`; error if unset |
+| `${NAME:-default}` | The value, or `default` when unset or empty |
+| `${NAME:?message}` | The value, or fail with `message` |
 
-Presets: `agentbox.sandbox.images.sandbox_config_for_preset("python"|"node"|"go"|"baked")`.
+Prefer `api_key_env: NAME` for secrets. It is resolved when requests are made,
+and keys never appear in trajectories, reports, `config show` output or command
+lines.
 
-## ModelConfig
+### Profiles
 
-| Field | Default | Meaning |
-| --- | --- | --- |
-| `model` | *(required)* | Model id for the server |
-| `base_url` | `None` | OpenAI-compatible endpoint |
-| `api_key` | `None` | Optional; env `OPENAI_API_KEY` fallback; local often `"EMPTY"` |
-| `temperature` | `0.7` | Sampling temperature |
-| `max_tokens` | `4096` | Completion cap |
-| `top_p` | `None` | Optional nucleus sampling |
-| `timeout_s` | `120.0` | HTTP timeout |
-| `tool_choice` | `"auto"` | OpenAI tool_choice |
-| `extra_headers` | `{}` | Passed to client |
-| `extra_body` | `{}` | Provider-specific body fields |
-| `require_tool_calling` | `True` | Prefer clear errors when tools unsupported |
+`--profile/-P NAME` (or `$AGENTBOX_PROFILE`) selects a profile from `models`.
+`students` entries become profiles named by their `id`, and `teacher` becomes
+`teacher`. Commands that take a model also accept `--model`/`--base-url`/
+`--api-key-env` directly, which override the profile.
 
-## AgentConfig
+### Checking a file
 
-| Field | Default | Meaning |
-| --- | --- | --- |
-| `tools` | `ToolMode.STRUCTURED` | `structured` / `shell` / `custom` / name list |
-| `custom_tools` | `[]` | Extra `BaseTool` instances (override by name) |
-| `builtins` | `True` | Include builtin set for mode |
-| `system_prompt` | `None` | Override default system prompt |
-| `max_steps` | `40` | Max tool-using turns |
-| `step_timeout_s` | `120.0` | Timeout for model call **or** tool batch |
-| `episode_timeout_s` | `900.0` | Whole-loop wall clock |
-| `parallel_tool_calls` | `True` | Concurrent tool execution |
-| `drop_tools` | `[]` | Always remove these tool names |
-| `drop_tools_prob` | `0.0` | Stochastic drop probability per tool |
-| `include_thinking` | `True` | Keep reasoning fields if present |
-| `step_penalty` | `0.0` | Subtracted × steps from reward |
-| `timeout_penalty` | `0.0` | Extra penalty on timeout |
-| `max_steps_penalty` | `0.0` | Extra penalty on max steps |
+```bash
+agentbox config show              # resolved config, keys redacted (--json for machines)
+agentbox config validate          # schema errors exit 2; unknown keys are listed
+agentbox config validate --strict # ... and unknown keys fail too (CI)
+agentbox config path              # which file is in use
+```
 
-## RolloutConfig
+## Python objects
 
-| Field | Default | Meaning |
-| --- | --- | --- |
-| `sandbox` | `SandboxConfig()` | Container settings |
-| `model` | *(required)* | `ModelConfig` |
-| `agent` | `AgentConfig()` | Loop / tools |
-| `seed` | `None` | RNG seed for tool dropping |
-| `save_dir` | `None` | Optional default save location |
-| `trajectory_format` | `"json"` | Hint for exporters |
-| `run_id` | `None` | Auto UUID if unset |
+```python
+from agentbox import AgentConfig, ModelConfig, ResourceLimits, RolloutConfig, SandboxConfig
 
-## GenerateConfig
+config = RolloutConfig(
+    model=ModelConfig(model="qwen3-1.7b", base_url="http://localhost:8000/v1", api_key="EMPTY"),
+    sandbox=SandboxConfig(limits=ResourceLimits(memory_mb=1024), warm_pool=4),
+    agent=AgentConfig(max_steps=30, tools="extended"),
+    seed=7,                       # per-sample sampling seeds and tool dropout derive from it
+)
+```
 
-Located in `agentbox.tasks.generate.generator`:
+`Rollout.run` and `ParallelRunner` take `config=` or the individual `model=`,
+`sandbox=` and `agent=` arguments (explicit arguments win). `ModelConfig` can
+be replaced by any `ModelClient` instance, such as a TITO client, a mock or
+your own.
 
-| Field | Default | Meaning |
-| --- | --- | --- |
-| `model` | required | Teacher model for generation |
-| `base_url` / `api_key` | optional | OpenAI-compatible (vLLM/TGI/cloud) |
-| `temperature` | `0.8` | Higher diversity for generation |
-| `max_tokens` | `8192` | Large enough for multi-file tasks |
-| `validate_in_docker` | `True` | Live seed + verifier QC |
-| `validate_with_llm` | `True` | Second API call: DSPy task quality judge |
-| `llm_judge_min_score` | `0.65` | Min judge score (0..1) to accept |
-| `validator_model` | same as `model` | Optional separate judge model id |
-| `validator_base_url` / `validator_api_key` | same as teacher | Optional separate judge endpoint |
-| `sandbox` | network on | QC sandbox config |
-| `max_retries` | `2` | Regenerate on QC failure |
-| `use_dspy` | `True` | Fall back to JSON mode if DSPy missing |
-| `expect_fail_on_starter` | `True` | Docker QC rejects tasks that already pass |
-| `disable_thinking` | `True` | Auto-disable Qwen/GLM deep-thinking extras |
+### Precedence
+
+For a single rollout, settings resolve in this order (later wins):
+
+1. Defaults of the config models.
+2. The project file (CLI only).
+3. CLI flags (`--max-steps`, `--image`, `--network`, `--warm-pool`, `--reward`, ...).
+4. Per-task overrides: `Task.environment` (image, env vars, network, CPU,
+   memory, working directory, `ensure_pytest`), `Task.max_steps`,
+   `Task.episode_timeout_s` and `Task.allowed_tools`.
 
 ## Environment variables
 
-| Variable | Use |
+| Variable | Effect |
 | --- | --- |
-| `OPENAI_API_KEY` | Default API key for model + CLI |
-| `AGENTBOX_LOG_LEVEL` | Logging level (if wired in process) |
-
-## Example composition
-
-```python
-from agentbox.config import (
-    AgentConfig, ModelConfig, ResourceLimits, RolloutConfig, SandboxConfig,
-)
-from agentbox.types import ToolMode
-
-config = RolloutConfig(
-    model=ModelConfig(
-        model="Qwen/Qwen2.5-7B-Instruct",
-        base_url="http://localhost:8000/v1",
-        api_key="EMPTY",
-        temperature=0.2,
-    ),
-    agent=AgentConfig(
-        tools=ToolMode.STRUCTURED,
-        max_steps=30,
-        drop_tools_prob=0.05,
-        step_penalty=0.001,
-    ),
-    sandbox=SandboxConfig(
-        image="agentbox/sandbox:latest",
-        ensure_pytest=False,
-        limits=ResourceLimits(
-            cpu_count=1.0,
-            memory_mb=1024,
-            network_disabled=True,
-        ),
-    ),
-    seed=42,
-)
-```
+| `AGENTBOX_CONFIG` | Project file path |
+| `AGENTBOX_PROFILE` | Default `--profile` |
+| `AGENTBOX_DOCKER_IO_THREADS` | Exec/archive thread pool size (default 128) |
+| `AGENTBOX_DOCKER_CTL_THREADS` | Create/remove/inspect thread pool size (default 16) |
+| `AGENTBOX_TASKS` | Task source used by the verl/OpenRLHF/SkyRL adapters to resolve `task_id`s |
+| `AGENTBOX_VERL_CONFIG` / `AGENTBOX_OPENRLHF_CONFIG` / `AGENTBOX_SKYRL_CONFIG` | YAML/JSON with `sandbox`, `agent`, `rewards` sections for those adapters |
+| `AGENTBOX_SERVER_TOKEN` | Bearer token required by `agentbox serve` |
+| `DOCKER_HOST` | Docker endpoint (standard docker-py behaviour) |

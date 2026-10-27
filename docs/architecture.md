@@ -1,135 +1,136 @@
 # Architecture
 
-AgentBox is organized so **sandbox execution**, **tools**, **model I/O**,
-**tasks/verification**, and **trajectory recording** stay independent. Docker
-and LLM HTTP stay on opposite sides of a clear boundary.
+## Layers
 
-## Control plane vs execution plane
-
-| Concern | Plane | Location |
-| --- | --- | --- |
-| Prompts, message history | Control | Host process |
-| Model HTTP (Chat Completions) | Control | Host (`openai.AsyncOpenAI`) |
-| Tool *schemas* | Control | Host (serializable JSON) |
-| Tool *execution* | Execution | Inside container via `SandboxManager` |
-| Verifier *command* | Execution | Inside container |
-| Trajectory serialization | Control | Host |
-
-**Invariant:** the model never talks to Docker. Only `SandboxManager` /
-`ToolExecutor` do.
-
-## Module responsibilities
-
-| Module / package | Responsibility | Notes |
-| --- | --- | --- |
-| `agentbox.cli` | Typer CLI | No Docker logic beyond calling APIs |
-| `agentbox.config` | Pydantic configs | Sandbox / model / agent / rollout |
-| `agentbox.types` | Enums | ToolMode, FinalStatus, VerifierType, MessageRole |
-| `agentbox.errors` | Exception hierarchy | Infra vs task vs model |
-| `agentbox.sandbox` | Container lifecycle, path jail, prune, snapshots | docker SDK + `asyncio.to_thread` |
-| `agentbox.tools` | Builtins, custom tools, registry, executor | Always uses sandbox facade |
-| `agentbox.model` | OpenAI-compatible + mock clients | No container I/O |
-| `agentbox.agent` | `Agent` facade, `AgentLoop`, prompts | Orchestrates model + tools |
-| `agentbox.tasks` | Schema, seeder, verifier, filters, bulk, rewards | Generator under `tasks.generate` |
-| `agentbox.trajectory` | Messages, recorder, exporters | JSON / ART / JSONL |
-| `agentbox.runner` | `Rollout`, `ParallelRunner` | Episode orchestration |
-| `agentbox.metrics` | Aggregate stats over trajectories | Offline analytics |
-
-## Package layout
-
-```txt
-src/agentbox/
-  cli/                 # Typer entrypoint
-  sandbox/             # Docker manager, paths, prune, snapshot, images
-  tools/               # builtins, BaseTool, @tool, registry, executor
-  model/               # OpenAICompatClient, MockModelClient
-  agent/               # Agent, AgentLoop, prompts
-  tasks/               # schema, seeder, verifier, filter, bulk, rewards
-    generate/          # TaskGenerator, DSPy signatures, live QC
-  trajectory/          # schema, recorder, formats/{art,jsonl}
-  runner/              # rollout, parallel
-  metrics/             # aggregate_trajectories
-  config.py
-  types.py
-  errors.py
+```mermaid
+flowchart TB
+  subgraph Front ends
+    CLI[agentbox CLI]
+    PY[Python API]
+    TR[Trainer adapters<br/>TRL · verl · OpenRLHF · SkyRL · ART]
+    SRV[HTTP server<br/>agentbox serve]
+  end
+  subgraph Episode
+    RUN[runner<br/>Rollout · ParallelRunner]
+    ENV[env<br/>AgentBoxEnv]
+    LOOP[agent<br/>AgentLoop · protocols · hooks]
+    TOOLS[tools<br/>registry · executor · builtins]
+    MODEL[model<br/>OpenAI-compatible · TITO · mock · replay]
+  end
+  subgraph Ground truth
+    TASKS[tasks<br/>schema · loader · verifier]
+    REW[rewards<br/>components · registry]
+  end
+  subgraph Execution plane
+    SBX[sandbox<br/>manager · backend · pool · prune]
+    DOCKER[(Docker daemon)]
+  end
+  subgraph Data
+    TRAJ[trajectory<br/>schema v2 · tokens · io]
+    EXP[export · rl · metrics]
+  end
+  CLI --> RUN
+  PY --> RUN
+  PY --> ENV
+  TR --> ENV
+  SRV --> ENV
+  RUN --> LOOP
+  ENV --> TOOLS
+  LOOP --> MODEL
+  LOOP --> TOOLS
+  TOOLS --> SBX
+  RUN --> TASKS
+  ENV --> TASKS
+  TASKS --> SBX
+  RUN --> REW
+  ENV --> REW
+  SBX --> DOCKER
+  RUN --> TRAJ
+  ENV --> TRAJ
+  TRAJ --> EXP
 ```
 
-## Single-rollout data flow
+Prompts, model calls, trajectories and rewards run on the host (the control
+plane). Every file operation, command and test runs inside the container (the
+execution plane).
 
-```txt
-Rollout.run(task, model|agent, sandbox_config)
-  -> resolve ModelClient + AgentConfig + SandboxConfig
-  -> SandboxManager.create(task_id, run_id)
-       labels: agentbox=1, task_id, run_id
-  -> TaskSeeder.seed
-       write starter_files under /workspace
-       run setup_commands sequentially (fail closed)
-       healthcheck
-  -> build_tool_registry (mode + custom + drop)
-  -> AgentLoop.run(system, task.description, ToolContext)
-       while steps < max_steps:
-         model.complete(messages, tools=schemas)
-         if tool_calls: ToolExecutor.execute_many -> append tool messages
-         else: break (final answer)
-  -> Verifier.verify (pytest|command)
-  -> TrajectoryRecorder.finalize(reward, final_status, metrics)
-  -> destroy sandbox (unless keep_on_failure)
-  -> return Trajectory
-```
+## One rollout
 
-## Parallel data flow
+1. **Provision** (`runner/provision.py`). Merge the task's `environment` over
+   the run's `SandboxConfig`. Resolve the image: the base image, or a cached
+   derived image with pytest installed once per image, or a cached
+   *setup snapshot* holding the task's `setup_commands` output. Take a warm-pool
+   container or create one, then seed the starter files with a single tar
+   upload. Failures raise `ProvisionError(kind)` (`sandbox`, `seed`,
+   `setup_check`).
+2. **Agent loop** (`agent/loop.py`). Alternate model turns and tool calls until
+   a final answer, `submit`, `max_steps`, the episode deadline or context
+   exhaustion. Tool calls run in emission order; consecutive read-only calls may
+   run concurrently. Every call gets a tool message, even on timeout.
+3. **Verify** (`tasks/verifier.py`). Restore protected files, write hidden
+   files, remove forbidden new files (planted `conftest.py`, ...), then run the
+   verifier command with a hardened environment. Parse the exit code, JUnit XML
+   (`pytest_fraction`) or stdout score.
+4. **Reward** (`rewards.py`). Weighted sum of components (`verifier`,
+   `step_penalty`, `llm_judge`, `module:function`, ...), with the per-component
+   breakdown kept on the trajectory.
+5. **Record** (`trajectory/`). A schema-v2 `Trajectory`: messages (with per-turn
+   token data when captured), tool-call records, verifier result, reward and
+   breakdown, `final_status`, `stop_reason`, `failure_kind`, and timings.
+6. **Release.** Remove the container, or keep it with `keep_on_failure` (its
+   name is recorded as `metadata.kept_sandbox`).
 
-```txt
-ParallelRunner(concurrency=N)
-  -> expand tasks × n_per_task (or group_size for GRPO)
-  -> asyncio.Semaphore(N)
-  -> each job: isolated Rollout.run (own manager/container)
-  -> failures become Trajectory(final_status=ERROR), do not cancel siblings
-  -> optional rich progress bar
-```
+`AgentBoxEnv` exposes the same steps one at a time (`reset` = provision,
+`step`/`call_tool` = tools, `evaluate` = verify + reward, `trajectory` =
+record) for trainers that own generation.
 
-## Task generation data flow
+## Package map
 
-```txt
-TaskGenerator.generate(difficulty, domain, constraints)
-  -> DSPy module OR OpenAI JSON completion
-  -> parse_task_from_prediction -> Task (Pydantic)
-  -> optional validate_task_live (Docker)
-  -> optional validate_task_llm (DSPy structured judge, same teacher endpoint):
-       create sandbox -> seed -> verifier smoke
-       expect starter to FAIL verifier
-  -> return Task | retry up to max_retries
-```
-
-## Design invariants
-
-1. **Fresh isolation** — one container per rollout; no host bind-mount of project by default.
-2. **Path jail** — all file tools resolve under `workspace_dir` (`/workspace`).
-3. **OpenAI tools protocol** — assistant `tool_calls` + `role=tool` results with `tool_call_id`.
-4. **Fail soft in the loop** — tool errors become tool-message text, not uncaught exceptions.
-5. **Seed fail closed** — if `setup_commands` fail, agent never starts; status `ERROR`.
-6. **Verifier authority** — reward comes from exit code (plus optional shaping).
-
-## Dependency direction
-
-```txt
-cli -> runner -> agent -> model
-              \-> tools -> sandbox
-              \-> tasks  -> sandbox
-              \-> trajectory
-runner / tasks.generate -> sandbox (QC only)
-```
-
-Lower layers do not import CLI or runner. `tools` never import `agent`.
-
-## Extension points
-
-| Want to… | Extend |
+| Package | Responsibility |
 | --- | --- |
-| New tool | `BaseTool` or `@tool`, register via `custom_tools` |
-| New model transport | Implement `ModelClient.complete` |
-| New verifier type | Extend `Verifier` / `VerifierSpec` carefully |
-| New export format | `trajectory/formats/` |
-| New image family | `sandbox.images.PRESETS` or `SandboxConfig.image` |
+| `sandbox/` | `DockerBackend` (shared client, bounded daemon thread pools, streaming exec with output caps, kill-on-timeout, image cache, derived images), `SandboxManager` (per-config lifecycle and file I/O), `pool.py` (warm pool), `prune.py`, `images.py` (presets) |
+| `tools/` | `BaseTool`, `@tool`, registry and modes, `ToolExecutor` (ordering, timeouts, truncation, records), builtins |
+| `agent/` | `AgentLoop`, `Conversation` (incremental wire payload), Hermes protocol, `AgentHooks`, prompts |
+| `model/` | `OpenAICompatClient` (typed retries, context-length handling, token capture), mock/function/replay clients, endpoint probes |
+| `tito.py` | Token-in/token-out generation (`TitoModelClient`, `ChatTokenizer`, `CompletionsGenerator`) |
+| `tasks/` | Task schema v2, loaders (dirs, JSON, JSONL(.gz), Parquet), seeder, verifier, filters, generation pipeline |
+| `rewards.py` | `RewardSpec`, reward registry, built-in components |
+| `runner/` | `Rollout.run`, `ParallelRunner` (stream, stream_groups, run_to_sink), provisioning, retries |
+| `env/` | `AgentBoxEnv`, `SyncAgentBoxEnv`, `RemoteEnv` |
+| `trajectory/` | Schema v2, token traces, sinks and readers, HTML rendering |
+| `export/` | Exporter registry: chat, sharegpt, dpo, grpo, tokens, hf, art |
+| `rl/` | pass@k, group advantages (GRPO, Dr. GRPO, RLOO), zero-variance groups |
+| `metrics/` | Streaming `MetricsAccumulator` |
+| `integrations/` | TRL, verl, OpenRLHF, SkyRL, ART adapters (imported only when used) |
+| `benchmark/` | Suites, content hashes, runner, reports, paired comparison |
+| `server/` | FastAPI environment server |
+| `cli/` | Typer application |
 
-See [Development](development.md) for testing expectations.
+## Concurrency model
+
+- **One Docker client per process.** `get_backend()` returns a shared
+  `DockerBackend`. Its connection pool matches its two thread pools: an **I/O**
+  pool (default 128 threads) for blocking exec streams and archive transfers,
+  and a **control** pool (default 16) for create, remove, inspect and kill.
+  Both use daemon threads, so a stuck stream can never block interpreter exit.
+  Size them with `AGENTBOX_DOCKER_IO_THREADS` / `AGENTBOX_DOCKER_CTL_THREADS`.
+- **Kill on timeout.** Every exec carries a unique environment marker. When a
+  command times out, its process tree is found by that marker and killed, so the
+  thread and the CPU are freed immediately.
+- **Bounded output.** Streams are read incrementally into head+tail buffers
+  (`max_output_bytes`). A command that exceeds `kill_output_bytes` is killed.
+- **Runner backpressure.** `ParallelRunner.stream` runs `concurrency` workers
+  over a lazily consumed job iterator and a bounded result queue. Model requests
+  can be capped separately with `model_concurrency`.
+- **Exit cleanup.** Containers this process created are tracked and removed at
+  exit; orphan pruning uses owner labels to spare other processes' sandboxes.
+
+## Invariants
+
+- A container is never handed to two rollouts.
+- Tool paths are resolved against the workspace; symlinks are followed only
+  inside it.
+- Conversations are always valid: no dangling tool calls, and ids match.
+- Infrastructure failures never look like policy failures (`failure_kind`).
+- Token data, when captured, is exactly what the server sampled.
+  `Trajectory.token_trace()` reports prefix breaks instead of hiding them.

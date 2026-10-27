@@ -10,7 +10,17 @@ local servers, cloud gateways). No vendor lock-in.
 Install:
 
 ```bash
-uv pip install -e ".[generate]"   # pulls dspy; OpenAI JSON fallback works without it
+pip install "agentbox-rl[generate]"   # pulls dspy; the OpenAI JSON fallback works without it
+```
+
+The teacher can come from flags or from `agentbox.yaml`:
+
+```yaml
+teacher:
+  model: Qwen/Qwen3.6-27B
+  base_url: http://teacher-host:8000/v1
+  api_key_env: TEACHER_API_KEY        # resolved at run time; never put keys on argv
+generate: {concurrency: 8, docker_concurrency: 8, target: 50, min_score: 0.7, use_dspy: false}
 ```
 
 ## Goals
@@ -26,8 +36,8 @@ uv pip install -e ".[generate]"   # pulls dspy; OpenAI JSON fallback works witho
 ```python
 from agentbox.tasks.generate import TaskGenerator, GenerateConfig
 
-# Self-hosted Qwen3.6-27B (example)
-gen = TaskGenerator(GenerateConfig(
+# Self-hosted Qwen3.6-27B (example); `async with` closes the HTTP clients
+async with TaskGenerator(GenerateConfig(
     model="Qwen/Qwen3.6-27B",
     base_url="http://YOUR_EC2:8000/v1",
     api_key="EMPTY",
@@ -38,20 +48,19 @@ gen = TaskGenerator(GenerateConfig(
     llm_judge_min_score=0.65,
     use_dspy=True,
     max_retries=3,
-))
+)) as gen:
+    task = await gen.generate(
+        difficulty="medium",
+        domain="python",
+        constraints="stub starter only; agent implements from pytest contract",
+        tags=["algorithms"],
+    )
+    task.save_json("tasks/generated/task.json")
 
-task = await gen.generate(
-    difficulty="medium",
-    domain="python",
-    constraints="stub starter only; agent implements from pytest contract",
-    tags=["algorithms"],
-)
-task.save_json("tasks/generated/task.json")
-
-# Re-audit an existing task (Docker + LLM, or LLM-only)
-report = await gen.validate_task(existing_task)
-llm_only = await gen.validate_task_llm_only(existing_task)
-print(report.ok, report.llm_score, report.errors)
+    # Re-audit an existing task (Docker + LLM, or LLM-only)
+    report = await gen.validate_task(existing_task)
+    llm_only = await gen.validate_task_llm_only(existing_task)
+    print(report.ok, report.llm_score, report.errors)
 ```
 
 CLI-style script:
@@ -68,7 +77,8 @@ python examples/generate_tasks.py \
 ## CLI
 
 ```bash
-# Single task (teacher from flags or agentbox.yaml)
+# Single task (teacher from flags or agentbox.yaml; the key from $OPENAI_API_KEY
+# or the teacher profile's api_key_env)
 agentbox generate one -m MODEL --base-url http://localhost:8000/v1 --out generated/tasks
 
 # Batch with resume, static/docker/llm QC, dedup
@@ -79,9 +89,16 @@ agentbox generate batch -m MODEL --base-url URL -n 20 -c 8 \
 agentbox generate batch -m MODEL --base-url URL -n 20 --two-stage
 
 # Re-audit
-agentbox generate validate-llm generated/tasks -m MODEL --base-url URL
-agentbox generate validate-docker generated/tasks
+agentbox generate validate-llm generated/tasks -m MODEL --base-url URL -c 8
+agentbox generate validate-docker generated/tasks -c 4
 ```
+
+`generate batch` is resumable: its state file and accepted tasks are written
+atomically, near-duplicate detection uses an inverted index (no O(n²) scans,
+only fingerprints are kept in memory), and an interrupted batch continues where
+it stopped. Before training on generated tasks, run `agentbox task check`
+([tasks](tasks.md#authoring-and-qc)) to confirm that the starter fails and the
+golden solution passes.
 
 ## Pipeline
 
@@ -142,9 +159,10 @@ report = await validate_task_llm(
 
 ## GenerateConfig
 
-See [Configuration](configuration.md#generateconfig).
-
-Key QC flags:
+`agentbox.tasks.generate.GenerateConfig` holds the teacher endpoint, retries,
+QC switches (`validate_static`, `validate_in_docker`, `validate_with_llm`,
+`two_stage`), the sandbox used for Docker QC, and an optional
+`validation_cache_dir`. Key QC flags:
 
 | Field | Default | Meaning |
 | --- | --- | --- |

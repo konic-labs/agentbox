@@ -1,150 +1,101 @@
 # CLI
 
-Entry point: `agentbox` (Typer), installed via package scripts.
+`agentbox` is a Typer application. Every command is documented in the
+generated [CLI reference](cli-reference.md); this page covers the conventions
+and common workflows.
 
-```bash
-agentbox --help
-agentbox version
-```
+## Conventions
 
-## Commands
-
-### `version`
-
-Print package version.
-
-### `doctor`
-
-Check runtime readiness.
-
-```bash
-agentbox doctor
-agentbox doctor --prune
-agentbox doctor --model MODEL --base-url http://localhost:8000/v1
-```
-
-Reports: version, Python, Docker ping, default image presence, labeled container
-count. Optional model probe checks chat + tool-calling (`tool_choice=auto`).
-`--prune` removes containers with label `agentbox=1`.
-
-Exit `2` if Docker is unavailable or model probe fails.
-
-### `build-image`
-
-Build the optional baked sandbox image.
-
-```bash
-agentbox build-image
-agentbox build-image --tag agentbox/sandbox:latest --path docker/python-sandbox
-```
-
-### `run`
-
-Single task rollout.
-
-```bash
-agentbox run TASK.json|TASK_DIR \
-  --model mock|MODEL_ID \
-  --base-url URL \
-  --api-key KEY \
-  --max-steps 40 \
-  --tools structured|shell|custom \
-  --out trajectories/ \
-  --image IMAGE \
-  --network
-```
-
-| Flag | Default | Notes |
-| --- | --- | --- |
-| `--model` | `mock` | `mock` uses a no-op final answer |
-| `--base-url` | none | OpenAI-compatible endpoint |
-| `--api-key` | env `OPENAI_API_KEY` | Optional for local servers |
-| `--max-steps` | 40 | Agent steps |
-| `--tools` | structured | Tool mode |
-| `--out` | `trajectories/` | Output directory |
-| `--image` | config default | Override image |
-| `--network` | off | Enable container network |
-
-Exit codes: `0` success, `1` failed/non-success, `2` infra/error.
-
-### `run-dir`
-
-Parallel batch over a directory of tasks.
-
-```bash
-agentbox run-dir tasks/ \
-  --model MODEL \
-  --base-url URL \
-  --concurrency 16 \
-  --n 4 \
-  --max-steps 40 \
-  --out trajectories/ \
-  --network
-```
-
-Discovers `*/task.json` directories and top-level `*.json` task files.
-Writes `dataset.jsonl` plus per-run JSON.
-
-### `export`
-
-```bash
-agentbox export traj.json --format art --out traj.art.json
-agentbox export traj.json --format jsonl --out traj.jsonl
-```
-
-### `prune`
-
-```bash
-agentbox prune
-```
-
-Remove all containers labeled `agentbox=1`.
-
-### `bench` (subcommand group)
-
-Real-rollout benchmark suites. See [benchmarks.md](benchmarks.md).
-
-```bash
-agentbox bench create DIR --from-tasks tasks/ --suite-id ID --name NAME [--network]
-agentbox bench freeze DIR
-agentbox bench validate DIR [--strict]
-agentbox bench run DIR --model-id LABEL -m MODEL --base-url URL [-o OUT]
-agentbox bench run DIR --student id=model@url --student id2=model2@url2
-agentbox bench run DIR --models-file models.yaml -o OUT --probe --limit 5
-agentbox bench run DIR --mock -o OUT          # hermetic pipeline smoke
-agentbox bench show OUT/report.json --out REPORT_extended.md
-agentbox bench compare a/report.json b/report.json
-```
-
-### `generate` (subcommand group)
-
-Automated coding-task generation + QC. See [generation.md](generation.md).
-
-```bash
-agentbox generate one -m MODEL --base-url URL -o generated/tasks
-agentbox generate batch -m MODEL --base-url URL -n 20 -c 8 --two-stage
-agentbox generate validate-llm generated/tasks -m MODEL --base-url URL
-agentbox generate validate-docker generated/tasks
-```
-
-Teacher defaults can come from `agentbox.yaml` (`teacher` / `generate` sections).
-
-### `traj` (subcommand group)
-
-```bash
-agentbox traj show path/to/traj.json
-agentbox traj render bench-results/run1 -o traj-dash.html
-agentbox traj render bench-results/run1 --model-id qwen-27b -o out.html
-```
-
-## Environment
-
-| Variable | Effect |
+| Global option | Effect |
 | --- | --- |
-| `OPENAI_API_KEY` | Default API key for `run` / `run-dir` / generate |
-| `AGENTBOX_CONFIG` | Path to project config (else walk for `agentbox.yaml`) |
+| `--config/-C PATH` | Project file (default: `$AGENTBOX_CONFIG` or the nearest `agentbox.yaml`) |
+| `--profile/-P NAME` | Model profile (default: `$AGENTBOX_PROFILE` or `default_model`) |
+| `--json` | Machine-readable output on stdout, for every command |
+| `-v` / `-vv` / `-q` | Info / debug logging / errors only |
+| `--log-format json` | Structured logs on stderr (one JSON object per line) |
 
-## Python vs CLI
+Global options go **before** the command: `agentbox --json traj stats runs/a`.
 
-The CLI covers common ops. Full flexibility (custom tools, generators, metrics)
-is via the Python API — see [Architecture](architecture.md) and module docs.
+| Exit code | Meaning |
+| --- | --- |
+| 0 | Success |
+| 1 | Task failures, thresholds not met (`--min-success-rate`, `--fail-on-regression`), invalid tasks or trajectories |
+| 2 | Usage or configuration errors |
+| 3 | Docker or the model endpoint is unavailable |
+
+Secrets are passed by environment variable name (`--api-key-env NAME`, or
+`api_key_env` in profiles), never as values on the command line. Shell
+completion: `agentbox --install-completion`.
+
+## Command map
+
+| Group | Commands |
+| --- | --- |
+| Rollouts | `run`, `serve` |
+| Trajectories | `traj show · stats · filter · validate · replay · render · export · diff` |
+| Tasks | `task new · validate · lint · check · select · show · ls · schema` |
+| Benchmarks | `bench create · freeze · validate · run · show · compare` |
+| Sandboxes | `sandbox up · exec · shell · ls · rm · prune` |
+| Images and caches | `image build · ls`, `cache ls · prune · warm` |
+| Task generation | `generate one · batch · validate-llm · validate-docker` |
+| Training | `train trl` |
+| Project | `init`, `config show · validate · path`, `doctor`, `integrations`, `version` |
+
+## Workflows
+
+**First run**
+
+```bash
+agentbox doctor && agentbox init && agentbox run tasks --mock -n 2
+```
+
+**Collect GRPO data**
+
+```bash
+agentbox cache warm tasks/                                  # setup snapshots once
+agentbox run tasks/ -n 8 -c 32 --warm-pool 4 --out runs/r1 --compress
+agentbox traj stats runs/r1
+agentbox traj export runs/r1 -f grpo --drop-zero-variance -o r1.grpo.jsonl
+```
+
+**Select learnable tasks for the next round**
+
+```bash
+agentbox task select tasks/ --runs runs/r1 --min-pass 0.01 --max-pass 0.99 -o round2.jsonl
+agentbox run round2.jsonl -n 8 --out runs/r2
+```
+
+**Exact token data for a custom trainer**
+
+```bash
+agentbox run tasks/ --tito Qwen/Qwen3-1.7B -n 8 --out runs/tito
+agentbox traj export runs/tito -f tokens -o tokens.jsonl
+```
+
+**Debug a failing task**
+
+```bash
+agentbox run tasks/x --keep-failed -n 1 --out runs/dbg
+agentbox traj show runs/dbg                 # verifier output + "sandbox kept: NAME"
+agentbox sandbox shell NAME
+```
+
+**Gate a model in CI**
+
+```bash
+agentbox bench run suites/coding-v1 --profile candidate --strict -o bench/candidate --min-success-rate 0.4
+agentbox bench compare bench/main/report.json bench/candidate/report.json --fail-on-regression 0.02
+```
+
+**Automation**
+
+```bash
+agentbox --json run tasks/ -n 4 --out runs/a | jq '.metrics.success_rate'
+agentbox --json --log-format json run ... 2> run.log.jsonl
+```
+
+## Deprecated aliases
+
+The 0.2 commands still work but are hidden: `run-dir` (use `run DIR`),
+`export` (use `traj export`), `prune` (use `sandbox prune`) and
+`build-image` (use `image build`). See [migration](migration.md).
