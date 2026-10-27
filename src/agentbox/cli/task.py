@@ -190,6 +190,59 @@ def task_ls(ctx: typer.Context, sources: Annotated[list[Path], typer.Argument()]
     )
 
 
+@task_app.command("select")
+def task_select(
+    ctx: typer.Context,
+    sources: Annotated[list[Path], typer.Argument(help="Task files/dirs/datasets")],
+    runs: Annotated[
+        list[Path], typer.Option("--runs", help="Trajectories with observed outcomes (repeat)")
+    ],
+    out: Annotated[Path, typer.Option("--out", "-o", help="Selected tasks (.jsonl[.gz])")],
+    min_pass: Annotated[float, typer.Option("--min-pass", help="Lowest pass rate kept")] = 0.0,
+    max_pass: Annotated[float, typer.Option("--max-pass", help="Highest pass rate kept")] = 1.0,
+    min_samples: Annotated[
+        int, typer.Option("--min-samples", help="Fewer observations count as unseen")
+    ] = 1,
+    drop_unseen: Annotated[
+        bool, typer.Option("--drop-unseen", help="Drop tasks without enough observations")
+    ] = False,
+) -> None:
+    """Keep tasks by observed pass rate, e.g. the learnable band for GRPO.
+
+    agentbox task select tasks/ --runs runs/probe --min-pass 0.01 --max-pass 0.99 -o learnable.jsonl
+    """
+    from agentbox.tasks.filter import filter_by_pass_rate, pass_rates
+    from agentbox.tasks.loader import iter_tasks
+    from agentbox.trajectory.io import iter_trajectories
+
+    st = state(ctx)
+    rates = pass_rates(t for run in runs for t in iter_trajectories(run))
+    tasks = list(iter_tasks(sources))
+    kept = filter_by_pass_rate(
+        tasks,
+        rates,
+        min_rate=min_pass,
+        max_rate=max_pass,
+        min_samples=min_samples,
+        keep_unseen=not drop_unseen,
+    )
+    out.parent.mkdir(parents=True, exist_ok=True)
+    import gzip
+
+    opener = gzip.open if out.name.endswith(".gz") else open
+    with opener(out, "wt", encoding="utf-8") as fh:
+        for t in kept:
+            fh.write(t.model_dump_json(exclude_defaults=True) + "\n")
+    unseen = sum(1 for t in tasks if rates.get(t.task_id, (0, 0))[1] < min_samples)
+    emit(
+        st,
+        {"tasks": len(tasks), "selected": len(kept), "unseen": unseen, "out": str(out)},
+        lambda: typer.echo(
+            f"selected {len(kept)}/{len(tasks)} tasks ({unseen} without enough samples) → {out}"
+        ),
+    )
+
+
 @task_app.command("schema")
 def task_schema() -> None:
     """Print the task JSON Schema (for editors / external validators)."""

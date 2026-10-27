@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import random
 from collections.abc import Iterable, Sequence
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from agentbox.tasks.schema import Task
+
+if TYPE_CHECKING:
+    from agentbox.trajectory.schema import Trajectory
 
 Difficulty = Literal["easy", "medium", "hard"]
 
@@ -94,3 +97,42 @@ def group_by_difficulty(tasks: Iterable[Task]) -> dict[str, list[Task]]:
             groups[str(d)] = []
         groups[str(d)].append(task)
     return groups
+
+
+def pass_rates(trajectories: Iterable[Trajectory]) -> dict[str, tuple[int, int]]:
+    """``task_id -> (successes, samples)`` over trainable rollouts (infra failures ignored)."""
+    out: dict[str, tuple[int, int]] = {}
+    for t in trajectories:
+        if not t.is_trainable:
+            continue
+        ok, n = out.get(t.task_id, (0, 0))
+        out[t.task_id] = (ok + int(t.success), n + 1)
+    return out
+
+
+def filter_by_pass_rate(
+    tasks: Iterable[Task],
+    rates: dict[str, tuple[int, int]],
+    *,
+    min_rate: float = 0.0,
+    max_rate: float = 1.0,
+    min_samples: int = 1,
+    keep_unseen: bool = True,
+) -> list[Task]:
+    """Keep tasks whose observed pass rate lies in ``[min_rate, max_rate]``.
+
+    The usual GRPO selection is the learnable band, e.g. ``min_rate=0.01,
+    max_rate=0.99``: tasks the policy always or never solves give zero-variance
+    groups. Tasks with fewer than ``min_samples`` observations are kept when
+    ``keep_unseen``.
+    """
+    selected: list[Task] = []
+    for task in tasks:
+        ok, n = rates.get(task.task_id, (0, 0))
+        if n < min_samples:
+            if keep_unseen:
+                selected.append(task)
+            continue
+        if min_rate <= ok / n <= max_rate:
+            selected.append(task)
+    return selected

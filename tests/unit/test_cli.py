@@ -171,3 +171,28 @@ def test_reward_flag_parsing() -> None:
         ("pkg.mod:fn", 2.0),
     ]
     assert specs[1].params == {"per_step": 0.02} and specs[3].params == {"flag": True}
+
+
+def test_task_select_by_pass_rate(tmp_path: Path) -> None:
+    from agentbox.tasks.schema import Task, VerifierSpec
+
+    tasks = tmp_path / "tasks.jsonl"
+    rows = [
+        Task(task_id=tid, description="d", verifier=VerifierSpec(type="pytest"))
+        for tid in ("a", "b", "c", "never_run")
+    ]
+    tasks.write_text("".join(t.model_dump_json() + "\n" for t in rows))
+    # a: 1/2 solved (learnable), b: always solved, c: never solved
+    runs = tmp_path / "runs.jsonl"
+    write_jsonl(
+        [_traj("a", 0, 1.0), _traj("a", 1, 0.0), _traj("b", 0, 1.0), _traj("c", 0, 0.0)], runs
+    )
+    out = tmp_path / "learnable.jsonl"
+    args = ["task", "select", str(tasks), "--runs", str(runs), "-o", str(out)]
+    r = runner.invoke(app, ["--json", *args, "--min-pass", "0.01", "--max-pass", "0.99"])
+    assert r.exit_code == 0, r.stdout
+    assert json.loads(r.stdout)["selected"] == 2  # a + the unseen task
+    ids = [json.loads(line)["task_id"] for line in out.read_text().splitlines()]
+    assert ids == ["a", "never_run"]
+    r = runner.invoke(app, [*args, "--min-pass", "0.01", "--max-pass", "0.99", "--drop-unseen"])
+    assert [json.loads(x)["task_id"] for x in out.read_text().splitlines()] == ["a"]
