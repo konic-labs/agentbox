@@ -104,6 +104,10 @@ def run(
     ] = False,
     image: Annotated[str | None, typer.Option("--image")] = None,
     network: Annotated[bool | None, typer.Option("--network/--no-network")] = None,
+    warm_pool: Annotated[
+        int | None,
+        typer.Option("--warm-pool", help="Pre-started containers kept ready per sandbox shape"),
+    ] = None,
     reward: Annotated[
         list[str] | None, typer.Option("--reward", help="name[:weight][,k=v] (repeat)")
     ] = None,
@@ -148,6 +152,8 @@ def run(
         sb_update["limits"] = sandbox.limits.model_copy(update={"network_disabled": not network})
     if keep_failed:
         sb_update["keep_on_failure"] = True
+    if warm_pool is not None:
+        sb_update["warm_pool"] = warm_pool
     sandbox = sandbox.model_copy(update=sb_update) if sb_update else sandbox
     agent = proj.agent or AgentConfig()
     ag_update: dict[str, Any] = {}
@@ -206,7 +212,10 @@ def run(
     fingerprint = {
         "model": model_cfg.model_dump(mode="json", exclude={"api_key"}),
         "agent": agent.model_dump(mode="json", exclude={"custom_tools"}),
-        "sandbox": sandbox.model_dump(mode="json"),
+        # operational knobs that cannot change outcomes stay out of the hash
+        "sandbox": sandbox.model_dump(
+            mode="json", exclude={"warm_pool", "warm_pool_ttl_s", "keep_on_failure"}
+        ),
         "rewards": [r.model_dump() for r in config.rewards] if config.rewards else None,
         "seed": seed,
         "tito": tito,
