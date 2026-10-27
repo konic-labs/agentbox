@@ -1,5 +1,9 @@
 # Architecture
 
+Every rollout takes the same five steps, whichever front end starts it:
+
+<img src="assets/readme/pipeline.svg" width="100%" alt="One rollout in five stages: provision a fresh, seeded sandbox; run the agent loop of model and tools; verify with tamper checks and the exit code; compute the weighted reward components; record the trajectory and tokens. The sandbox is destroyed, and the red line of the trajectory is what remains.">
+
 ## Layers
 
 ```mermaid

@@ -109,6 +109,10 @@ regressed tasks. With `--fail-on-regression X`, it exits 1 when success drops
 by more than X, which makes a simple CI gate. It warns when suite ids or
 content hashes differ.
 
+The single-GPU verl run from the [verl guide](integrations/verl.md#results), compared with its base model:
+
+<img src="assets/readme/compare.svg" width="100%" alt="Successes on each held-out task for the base model and after 30 steps: bug_reverse 0 of 8 to 3 of 8; bug_shout 0 of 8 to 8 of 8; bug_total 0 of 8 to 0 of 8; file_00 8 of 8 to 8 of 8; file_05 8 of 8 to 8 of 8; file_06 8 of 8 to 8 of 8; file_11 8 of 8 to 8 of 8; stub_is_prime 2 of 8 to 7 of 8; stub_word_count 1 of 8 to 6 of 8.">
+
 ## Setup checks
 
 `ScoringConfig.setup_checks` are suite-level commands that run after seeding

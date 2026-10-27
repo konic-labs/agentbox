@@ -4,6 +4,10 @@ AgentBox does not train models. It gives an RL framework what agentic training
 needs outside the trainer: an isolated environment per episode, tools, a
 trustworthy reward, and exact records of what was sampled.
 
+<img src="assets/readme/training.svg" width="100%" alt="Reward while training, in two 30-step GRPO runs of Qwen3-0.6B with verl on one L4 GPU. The 4-step mean of the training reward rises from about 0.57 to 0.86, and validation on 9 held-out tasks from 0.70 to 0.89. Held-out success is 48.6% for the base model and 77.8% after 30 steps; the first run reached 83.3%.">
+
+The chart comes from the tested single-GPU recipe in the [verl guide](integrations/verl.md#single-gpu-a-tested-recipe).
+
 ## Choosing an integration
 
 | Your setup | Use | How generation works |
@@ -77,6 +81,8 @@ The verl and OpenRLHF adapters work at the token level natively. The TRL
 adapter lets TRL tokenise, which is what TRL expects.
 
 ## RL utilities
+
+<img src="assets/readme/group.svg" width="100%" alt="A GRPO group: one task in four sandboxes. Rewards 1.0, 0.0, 1.0 and 1.0 give advantages +0.58, -1.73, +0.58 and +0.58.">
 
 ```python
 from agentbox.rl import group_advantages, group_stats, is_zero_variance, pass_at_k

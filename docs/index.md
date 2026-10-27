@@ -6,6 +6,8 @@ trainer (TRL, verl, OpenRLHF, SkyRL, ART or your own loop) owns generation and
 optimisation, and AgentBox owns sandboxes, tools, verification, rewards and
 trajectory data.
 
+<img src="assets/readme/pipeline.svg" width="100%" alt="One rollout in five stages: provision a fresh, seeded sandbox; run the agent loop of model and tools; verify with tamper checks and the exit code; compute the weighted reward components; record the trajectory and tokens. The sandbox is destroyed, and the red line of the trajectory is what remains.">
+
 ## Start here
 
 | I want to... | Read |
