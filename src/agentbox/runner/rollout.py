@@ -275,6 +275,10 @@ async def _run(
         "created_at": created_at,
     }
     meta: dict[str, Any] = {"task_metadata": task.metadata, "tools_available": registry.names()}
+    if task.split is not None:
+        meta["split"] = task.split
+    if task.group_key is not None:
+        meta["group_key"] = task.group_key
     built: list[Trajectory] = []
 
     def build(

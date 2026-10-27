@@ -87,6 +87,19 @@ def test_iter_tasks_mixed_sources(tmp_path: Path) -> None:
         list(iter_tasks(tmp_path / "missing"))
 
 
+def test_iter_tasks_split_filter(tmp_path: Path) -> None:
+    rows = [
+        _task("a").model_copy(update={"split": "train"}),
+        _task("b").model_copy(update={"split": "eval"}),
+        _task("c"),
+    ]
+    path = tmp_path / "tasks.jsonl"
+    path.write_text("".join(t.model_dump_json() + "\n" for t in rows))
+    assert [t.task_id for t in iter_tasks(path, split="train")] == ["a"]
+    assert [t.task_id for t in iter_tasks(path, split="eval")] == ["b"]
+    assert [t.task_id for t in iter_tasks(path)] == ["a", "b", "c"]
+
+
 async def test_compute_reward_components() -> None:
     verify = SimpleNamespace(reward=1.0, success=True, tests_total=4, tests_passed=3, tampered=[])
     records = [
