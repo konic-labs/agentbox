@@ -1,12 +1,11 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-fancy-pypi-readme>=24.1"]
 build-backend = "hatchling.build"
 
 [project]
 name = "agentbox-rl"
-dynamic = ["version"]
+dynamic = ["version", "readme"]
 description = "Docker sandboxes, tools, rewards and trajectories for RL post-training of LLM agents (TRL, verl, OpenRLHF, SkyRL, ART)"
-readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
 authors = [{ name = "AgentBox Contributors" }]
@@ -65,6 +64,22 @@ Issues = "https://github.com/konic-labs/agentbox/issues"
 [tool.hatch.version]
 path = "src/agentbox/version.py"
 
+# The PyPI description is the README, but PyPI cannot resolve its relative images and
+# links: point them at GitHub, at this release's tag ($HFPR_VERSION is the version).
+[tool.hatch.metadata.hooks.fancy-pypi-readme]
+content-type = "text/markdown"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.fragments]]
+path = "README.md"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = 'src="((?:docs|examples)/[^"]+)"'
+replacement = 'src="https://raw.githubusercontent.com/konic-labs/agentbox/v$HFPR_VERSION/\1"'
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '\]\(((?:docs|examples|scripts)/[^)\s]*|LICENSE|CHANGELOG\.md)\)'
+replacement = '](https://github.com/konic-labs/agentbox/blob/v$HFPR_VERSION/\1)'
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentbox"]
 
@@ -73,6 +88,7 @@ include = [
     "/src",
     "/tests",
     "/examples",
+    "/scripts",
     "/docs",
     "/README.md",
     "/CHANGELOG.md",
