@@ -1,0 +1,3 @@
+# verl agent-loop registry: rows with agent_name=agentbox use AgentBox sandboxes
+- name: agentbox
+  _target_: agentbox.integrations.verl.AgentBoxAgentLoop

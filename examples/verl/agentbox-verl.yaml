@@ -1,0 +1,10 @@
+# AgentBox settings read by verl workers ($AGENTBOX_VERL_CONFIG)
+sandbox:
+  limits: {cpu_count: 1.0, memory_mb: 1024, network_disabled: true}
+  warm_pool: 8
+agent:
+  tools: structured
+  max_steps: 16
+rewards:
+  - {name: verifier}
+  - {name: step_penalty, params: {per_step: 0.005}}
