@@ -4,10 +4,13 @@ AgentBox no longer depends on ART; this module converts trajectories into ART's
 ``Trajectory`` / ``TrajectoryGroup`` shapes when ``openpipe-art`` is installed.
 
 ART trains on assistant turns given as OpenAI ``Choice`` objects with logprobs
-(plain assistant dicts only with ``allow_training_without_logprobs``). When a
-rollout captured token ids + logprobs (``ModelConfig.capture_tokens`` and
-``capture_logprobs``), each assistant turn becomes such a ``Choice`` whose
-logprob tokens use vLLM's ``token_id:<id>`` form, so ART re-tokenizes nothing.
+(plain assistant dicts only with ``allow_training_without_logprobs``) and
+assembles its training sequences from vLLM's ``prompt_token_ids`` /
+``token_ids`` on each Choice. When a rollout captured token ids + logprobs
+(``ModelConfig.capture_tokens`` and ``capture_logprobs``), every assistant turn
+whose full prompt can be rebuilt from the trace becomes such a ``Choice``
+(logprob tokens also use the ``token_id:<id>`` form older ART releases read), so
+ART trains on exactly the sampled tokens and never re-tokenizes.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from collections.abc import Iterable
 from typing import Any, Literal
 
 from agentbox.trajectory.schema import Message, Trajectory
+from agentbox.trajectory.tokens import iter_message_samples
 from agentbox.types import FinalStatus, MessageRole
 
 _SCALARS = (str, int, float, bool, type(None))
@@ -39,49 +43,56 @@ _FINISH_REASONS: dict[str, FinishReason] = {
 }
 
 
-def art_choice(message: Message) -> Any | None:
-    """OpenAI ``Choice`` for an assistant turn with complete token logprobs, else None."""
+def art_choice(message: Message, prompt_ids: list[int] | None) -> Any | None:
+    """OpenAI ``Choice`` for an assistant turn with full token data, else None.
+
+    ``prompt_ids`` is the turn's complete prompt (see
+    :func:`agentbox.trajectory.tokens.iter_message_samples`); without it ART
+    cannot place the turn, so no Choice is built.
+    """
     tok = message.tokens
     if (
         message.role != MessageRole.ASSISTANT
+        or prompt_ids is None
         or tok is None
         or tok.logprobs is None
         or len(tok.logprobs) != len(tok.completion_ids)
         or not tok.completion_ids
     ):
         return None
-    from openai.types.chat import ChatCompletionMessage, ChatCompletionTokenLogprob
-    from openai.types.chat.chat_completion import Choice, ChoiceLogprobs
+    from openai.types.chat.chat_completion import Choice
 
     wire = message.to_openai_dict(include_reasoning=False)
     finish = _FINISH_REASONS.get(
         message.finish_reason or "", "tool_calls" if message.tool_calls else "stop"
     )
-    return Choice(
-        index=0,
-        finish_reason=finish,
-        message=ChatCompletionMessage.model_validate(
-            {
+    return Choice.model_validate(
+        {
+            "index": 0,
+            "finish_reason": finish,
+            "message": {
                 "role": "assistant",
                 "content": wire.get("content"),
                 "tool_calls": wire.get("tool_calls") or None,
-            }
-        ),
-        logprobs=ChoiceLogprobs(
-            content=[
-                ChatCompletionTokenLogprob(
-                    token=f"token_id:{tid}", logprob=lp, bytes=None, top_logprobs=[]
-                )
-                for tid, lp in zip(tok.completion_ids, tok.logprobs, strict=True)
-            ]
-        ),
+            },
+            "logprobs": {
+                "content": [
+                    {"token": f"token_id:{tid}", "logprob": lp, "bytes": None, "top_logprobs": []}
+                    for tid, lp in zip(tok.completion_ids, tok.logprobs, strict=True)
+                ]
+            },
+            # vLLM return_token_ids fields, read by ART to assemble training sequences
+            "prompt_token_ids": list(prompt_ids),
+            "token_ids": list(tok.completion_ids),
+        }
     )
 
 
 def _messages_and_choices(traj: Trajectory, *, choices: bool, as_dicts: bool) -> list[Any]:
+    prompts = {i: p for i, p, _, _ in iter_message_samples(traj.messages)} if choices else {}
     out: list[Any] = []
-    for m in traj.messages:
-        choice = art_choice(m) if choices else None
+    for i, m in enumerate(traj.messages):
+        choice = art_choice(m, prompts.get(i)) if choices else None
         if choice is None:
             out.append(m.to_openai_dict(include_reasoning=True))
         else:

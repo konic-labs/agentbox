@@ -37,10 +37,20 @@ def _traj(**kw: object) -> Trajectory:
                     )
                 ],
                 finish_reason="tool_calls",
-                tokens=TurnTokens(completion_ids=[11, 12, 13], logprobs=[-0.5, -0.25, 0.0]),
+                tokens=TurnTokens(
+                    completion_ids=[11, 12, 13], logprobs=[-0.5, -0.25, 0.0], prompt_ids=[1, 2, 3]
+                ),
             ),
             Message(role=MessageRole.TOOL, content="x = 1", tool_call_id="c1", name="read_file"),
-            Message(role=MessageRole.ASSISTANT, content="done"),  # no token data
+            Message(
+                role=MessageRole.ASSISTANT,
+                content="done",
+                # reuses the whole previous sequence, then the tool-result delta
+                tokens=TurnTokens(
+                    completion_ids=[21], logprobs=[-0.1], prompt_reuse=6, prompt_ids=[30, 31]
+                ),
+            ),
+            Message(role=MessageRole.ASSISTANT, content="bye"),  # no token data
         ],
         "reward": 1.0,
         "reward_breakdown": {"verifier": 1.0, "step_penalty": -0.1},
@@ -75,15 +85,20 @@ def test_correct_comes_from_the_verifier() -> None:
     assert to_art_dict(failed_loop)["metrics"]["correct"] == 1.0
 
 
-def test_assistant_turns_with_logprobs_become_choices() -> None:
+def test_assistant_turns_with_token_data_become_choices() -> None:
     items = to_art_dict(_traj())["messages_and_choices"]
-    assert [i.get("role") for i in items] == ["system", "user", None, "tool", "assistant"]
-    choice = items[2]
-    assert choice["finish_reason"] == "tool_calls"
-    assert choice["message"]["tool_calls"][0]["function"]["name"] == "read_file"
-    tokens = choice["logprobs"]["content"]
+    roles = [i.get("role") for i in items]
+    assert roles == ["system", "user", None, "tool", None, "assistant"]
+    first, second = items[2], items[4]
+    assert first["finish_reason"] == "tool_calls"
+    assert first["message"]["tool_calls"][0]["function"]["name"] == "read_file"
+    tokens = first["logprobs"]["content"]
     assert [t["token"] for t in tokens] == ["token_id:11", "token_id:12", "token_id:13"]
     assert [t["logprob"] for t in tokens] == [-0.5, -0.25, 0.0]
+    # vLLM fields ART assembles sequences from; the second prompt is rebuilt
+    assert first["prompt_token_ids"] == [1, 2, 3] and first["token_ids"] == [11, 12, 13]
+    assert second["prompt_token_ids"] == [1, 2, 3, 11, 12, 13, 30, 31]
+    assert second["token_ids"] == [21] and second["finish_reason"] == "stop"
     # opt out: plain messages only
     plain = to_art_dict(_traj(), choices=False)["messages_and_choices"]
     assert all("role" in i for i in plain)
@@ -95,9 +110,12 @@ def test_incomplete_token_data_stays_a_message() -> None:
         content="hi",
         tokens=TurnTokens(completion_ids=[1, 2], logprobs=None),
     )
-    assert art_choice(msg) is None
+    assert art_choice(msg, [7]) is None
     msg.tokens = TurnTokens(completion_ids=[1, 2], logprobs=[-0.1])  # length mismatch
-    assert art_choice(msg) is None
+    assert art_choice(msg, [7]) is None
+    msg.tokens = TurnTokens(completion_ids=[1, 2], logprobs=[-0.1, -0.2])
+    assert art_choice(msg, None) is None  # prompt unknown: ART could not place it
+    assert art_choice(msg, [7]) is not None
 
 
 def test_deprecated_trajectory_methods_warn_and_delegate() -> None:

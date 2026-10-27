@@ -113,20 +113,38 @@ class TokenTrace(BaseModel):
         return max(0, len(self.sequences) - 1)
 
 
-def iter_turn_samples(
-    turns: Iterable[TurnTokens | None],
-) -> Iterator[tuple[list[int], list[int], list[float] | None]]:
-    """Exact per-turn ``(prompt_ids, completion_ids, logprobs)``; skips uncaptured turns."""
+def _samples(
+    turns: Iterable[tuple[int, TurnTokens | None]],
+) -> Iterator[tuple[int, list[int], list[int], list[float] | None]]:
     prev: list[int] | None = None
-    for turn in turns:
+    for key, turn in turns:
         if turn is None or turn.prompt_ids is None:
             prev = None
             continue
         if turn.prompt_reuse and prev is None:
             continue  # cannot reconstruct without the previous turn
         prompt = (prev[: turn.prompt_reuse] if prev is not None else []) + turn.prompt_ids
-        yield prompt, turn.completion_ids, turn.logprobs
+        yield key, prompt, turn.completion_ids, turn.logprobs
         prev = prompt + turn.completion_ids
+
+
+def iter_turn_samples(
+    turns: Iterable[TurnTokens | None],
+) -> Iterator[tuple[list[int], list[int], list[float] | None]]:
+    """Exact per-turn ``(prompt_ids, completion_ids, logprobs)``; skips uncaptured turns."""
+    for _, prompt, completion, logprobs in _samples(enumerate(turns)):
+        yield prompt, completion, logprobs
+
+
+def iter_message_samples(
+    messages: Iterable[Any],
+) -> Iterator[tuple[int, list[int], list[int], list[float] | None]]:
+    """``(message_index, prompt_ids, completion_ids, logprobs)`` per reconstructable turn."""
+    return _samples(
+        (i, getattr(m, "tokens", None))
+        for i, m in enumerate(messages)
+        if (m.role.value if hasattr(m.role, "value") else m.role) == "assistant"
+    )
 
 
 def build_token_trace(turns: Iterable[TurnTokens | None]) -> TokenTrace | None:
