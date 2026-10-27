@@ -120,16 +120,23 @@ model call fell from 0.31 s to 0.04 s at the median, and wall clock went from
 
 - `auto_remove` (default true) removes each sandbox after its rollout.
 - `keep_on_failure` keeps the sandboxes of rollouts that did not succeed.
-  The name is recorded as `metadata.kept_sandbox`, and `agentbox traj show`
-  prints it together with the command to open a shell.
+  Kept containers are renamed `<name>-kept`. The name is recorded as
+  `metadata.kept_sandbox`, and `agentbox traj show` prints it together with
+  the command to open a shell.
 - Containers created by a process are tracked and removed when it exits.
+- A process killed without running its exit handlers leaves its sandboxes
+  behind; Ray SIGKILLs trainer workers at the end of every verl run, for
+  example. The first process to use Docker afterwards removes, in the
+  background, the containers of dead processes on this host. Live processes'
+  containers and kept sandboxes are never touched. Set
+  `AGENTBOX_REAP_ORPHANS=0` to disable this.
 - Every container is labelled `agentbox=1`, `agentbox.owner=<host:pid>`,
   `agentbox.created`, `agentbox.role`, and per rollout `agentbox.task_id`,
   `agentbox.run_id`, `agentbox.rollout_id` and `agentbox.group_id`.
 
 ```bash
 agentbox sandbox ls                    # owner, age, orphan status (-a: builders and probes too)
-agentbox sandbox prune                 # orphans only: owner process is gone
+agentbox sandbox prune                 # orphans only: owner process is gone (kept sandboxes stay)
 agentbox sandbox prune --run-id RUN    # one run's sandboxes
 agentbox sandbox prune --older-than 2h --dry-run
 agentbox sandbox prune --all           # every AgentBox container

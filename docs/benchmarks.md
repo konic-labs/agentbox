@@ -18,10 +18,16 @@ my-suite/
 
 ```bash
 agentbox bench create suites/coding-v1 --from-tasks tasks/ \
-  --suite-id coding --name "Coding v1" --version 1.0.0 --n 4   # copies tasks and freezes the hash
+  --suite-id coding --name "Coding v1" --version 1.0.0 --n 4 \
+  --tools list_files,read_file,write_file,run_tests --max-steps 6   # copies tasks, freezes the hash
 agentbox bench validate suites/coding-v1 --strict                # structure + integrity (exit 1 on mismatch)
 agentbox bench freeze suites/coding-v1                           # re-freeze after an intended edit
 ```
+
+The frozen agent starts from the project's `agent:` section (custom tools and
+tool dropout are always removed). `--tools`, `--max-steps` and
+`--episode-timeout` override it, so an eval suite can match a training setup
+exactly.
 
 The content hash (version 2) covers each task except its free-form `metadata`,
 plus the fairness-critical configuration: image, workspace, environment,
