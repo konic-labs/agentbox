@@ -1,6 +1,21 @@
 # Changelog
 
-## Unreleased — multi-GPU and multi-node training (#98)
+## 0.4.0 — multi-GPU and multi-node training
+
+Launchers for verl, OpenRLHF, SkyRL and TRL are tested on two GPUs (#98).
+GPU nodes can leave their sandboxes to an `agentbox serve` host, one cap
+holds the sandboxes of every worker on a node, and sandboxes die with the
+trainer worker that created them (#111).
+
+### Upgrading from 0.3
+- `sandbox.die_with_owner` is on by default: each sandbox's command runs
+  under a small `/bin/sh` watcher that ends the container when the process
+  that created it dies. Images without `/bin/sh` need `die_with_owner:
+  false`. Each sandbox holds one file descriptor in its owner, so raise
+  `ulimit -n` for a few hundred sandboxes in one process
+- `agentbox serve` no longer imports code that a client names (a reward
+  `module:function`, a task's custom `reward_fn`). Start it with
+  `--allow-client-callables` to accept such code from trusted clients
 
 ### Trainer integrations
 - Tested launchers on two GPUs for verl (`examples/verl/run_grpo_multi_gpu.sh`:
