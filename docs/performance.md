@@ -57,6 +57,7 @@ concurrency.
 | `concurrency` (`-c`) | 8 | the Docker host has idle CPU and memory | sandboxes contend for CPU (slow tests) |
 | `model_concurrency` | = concurrency | the inference server is underutilised | it queues or 429s |
 | `warm_pool` | 0 | container start shows up in time-to-first-call | memory is tight, or tasks all have distinct images |
+| `host_max_sandboxes` | none | n/a | trainer workers on one node together start more sandboxes than its CPUs and memory hold ([sandbox](sandbox.md#host-wide-cap)) |
 | `limits.cpu_count` / `memory_mb` | 1.0 / 512 | tests are slow or OOM | you need more concurrent sandboxes |
 | `max_output_bytes` | 256 KiB | verifier output is cut too early | memory per exec matters |
 | `kill_output_bytes` | 64 MiB | tasks legitimately print a lot | runaway output costs time |
