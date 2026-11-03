@@ -104,6 +104,7 @@ $ agentbox serve [OPTIONS]
 * `--token-env <str>`: Env var holding the bearer token  [default: AGENTBOX_SERVER_TOKEN]
 * `--max-sessions <int>`: [default: 64]
 * `--idle-ttl <float>`: Seconds before idle sessions are reaped  [default: 1800.0]
+* `--allow-client-callables`: Accept tasks and rewards from clients that name code to import on this host
 * `--help`: Show this message and exit.
 
 ## `agentbox version`
