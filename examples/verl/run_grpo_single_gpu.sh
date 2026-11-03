@@ -61,6 +61,6 @@ python -m verl.trainer.main_ppo \
   trainer.rollout_data_dir="$PWD/rollouts" \
   "$@" || status=$?
 
-# Ray SIGKILLs the agent-loop workers at the end: remove the sandboxes they still hold
+# Sandboxes die with the workers Ray SIGKILLs (die_with_owner); this catches older or unbound ones
 python -m agentbox sandbox prune || true
 exit "$status"

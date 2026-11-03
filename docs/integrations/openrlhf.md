@@ -52,8 +52,9 @@ EPISODES=3 examples/openrlhf/run.sh        # 27 tasks x 3 passes = 10 steps
 Every engine actor is one AgentBox process with its own warm pool, and
 `sandbox.host_max_sandboxes` in
 [`agentbox-openrlhf.yaml`](../../examples/openrlhf/agentbox-openrlhf.yaml)
-bounds them together. The script removes the sandboxes Ray's SIGKILL left
-behind when training ends, and takes only full rollout batches
+bounds them together. Sandboxes die with the engine actors Ray SIGKILLs at the
+end, and the script prunes after training as a fallback. It takes only full
+rollout batches
 (`--data.max_samples`): OpenRLHF trains on a last, partial batch too, and on two
 ranks that batch hung ZeRO-2's gradient all-reduce until NCCL's 10-minute
 timeout.

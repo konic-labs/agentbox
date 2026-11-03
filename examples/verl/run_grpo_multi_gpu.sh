@@ -78,8 +78,8 @@ python -m verl.trainer.main_ppo \
   trainer.rollout_data_dir="${ROLLOUTS:-$PWD/rollouts}" \
   "$@" || status=$?
 
-# Ray SIGKILLs the agent-loop workers at the end, so their exit handlers never remove the
-# sandboxes they still hold (warm-pool containers). Remove them on every node.
+# Ray SIGKILLs the agent-loop workers at the end. Their sandboxes die with them
+# (die_with_owner); this removes older or unbound ones, on every node.
 if [ "$NNODES" -gt 1 ]; then
   python -m agentbox sandbox prune --ray-address auto || true
 else

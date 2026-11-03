@@ -121,8 +121,8 @@ negative budget.
 | Metrics are block-buffered under Ray | `PYTHONUNBUFFERED=1` |
 
 verl stops its workers with SIGKILL at the end of a run, so their exit handlers
-never run. The script then removes the sandboxes they left behind, warm-pool
-containers mostly, with `agentbox sandbox prune`
+never run. Their sandboxes die with them all the same, and the script runs
+`agentbox sandbox prune` as a fallback
 ([sandbox lifecycle](../sandbox.md#lifecycle-and-cleanup)).
 
 ## Multi-GPU: a tested recipe
@@ -214,7 +214,7 @@ start and end add a round trip.
 | --- | --- |
 | On a cluster started with `ray start`, workers do not inherit the launching shell's environment | the script passes `AGENTBOX_VERL_CONFIG` and `AGENTBOX_TASKS` as `++ray_kwargs.ray_init.runtime_env.env_vars.*`; the config variable may hold one-line JSON when the nodes share no filesystem |
 | vLLM's custom all-reduce failed with `CUDA error ... custom_all_reduce.cuh: 'invalid argument'` at `TP=2` on our PCIe-connected pair | the script sets `+actor_rollout_ref.rollout.engine_kwargs.vllm.disable_custom_all_reduce=True` when `TP` > 1, and NCCL does the reductions |
-| Ray SIGKILLs the agent-loop workers: the 30-step run left 20 idle warm-pool containers | the script runs `agentbox sandbox prune` after training (`--ray-address auto` on several nodes); the runs after that change left none |
+| Ray SIGKILLs the agent-loop workers: the 30-step run left 20 idle warm-pool containers | sandboxes now die with their worker (`die_with_owner`): a run whose launcher had no prune left none. The script still runs `agentbox sandbox prune` after training (`--ray-address auto` on several nodes) for older or unbound sandboxes |
 | A large batch starts every sandbox at once | `sandbox.host_max_sandboxes` ([sandbox](../sandbox.md#host-wide-cap)) |
 | No flash-attn wheel exists for torch 2.11 / CUDA 13 / sm_120 | `FLASH_ATTN_CUDA_ARCHS=120 MAX_JOBS=44 pip wheel --no-build-isolation --no-cache-dir flash-attn==2.8.3` with `ninja` on `PATH`: about 4 minutes on 48 vCPUs, while without ninja it compiles one file at a time. `--no-cache-dir` keeps pip from reusing a wheel built against another torch |
 
