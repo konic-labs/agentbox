@@ -1008,6 +1008,21 @@ def get_backend() -> DockerBackend:
         return _default_backend
 
 
+def release_process_sandboxes() -> int:
+    """Remove every sandbox this process still holds, idle warm-pool containers included.
+
+    For shutdown paths that skip exit handlers: uvicorn re-raises SIGTERM after a
+    graceful shutdown, so a server process dies by the signal and ``atexit``
+    cleanup never runs. Returns the number of containers removed.
+    """
+    backend = _default_backend
+    if backend is None or backend.closed or backend.pid != os.getpid():
+        return 0
+    from agentbox.sandbox.pool import close_pool
+
+    return close_pool(backend) + backend.cleanup_live_sync()
+
+
 def get_client(docker_client: Any | None = None) -> Any:
     """Return ``docker_client`` or the shared backend's client (compat helper)."""
     if docker_client is not None:

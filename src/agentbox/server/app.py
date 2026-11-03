@@ -33,6 +33,7 @@ from agentbox.config import AgentConfig, SandboxConfig
 from agentbox.env.env import AgentBoxEnv
 from agentbox.rewards import RewardSpec, available_rewards
 from agentbox.runner.provision import ProvisionError
+from agentbox.sandbox.backend import release_process_sandboxes
 from agentbox.tasks.loader import iter_tasks
 from agentbox.tasks.schema import Task
 
@@ -101,6 +102,11 @@ def create_app(settings: ServerSettings | None = None) -> Any:
                 *(s.env.close() for s in sessions.values()), return_exceptions=True
             )
             sessions.clear()
+            # uvicorn re-raises SIGTERM after this shutdown, and the process then dies
+            # without running exit handlers: remove the warm pool and any leftovers now
+            removed = await asyncio.to_thread(release_process_sandboxes)
+            if removed:
+                logger.info("removed %d idle sandbox(es) on shutdown", removed)
 
     app = FastAPI(title="AgentBox environment server", lifespan=lifespan)
 
