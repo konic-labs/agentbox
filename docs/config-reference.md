@@ -53,6 +53,7 @@ Container lifecycle and environment settings.
 | `cache_max_images` | int | `64` | LRU bound on cached setup images. |
 | `warm_pool` | int | `0` | Pre-started containers kept ready per sandbox shape (image, limits, env); each is used by one rollout only. 0 disables the pool. |
 | `warm_pool_ttl_s` | float | `300.0` | Idle pooled containers are removed after this long. |
+| `die_with_owner` | bool | `True` | The Docker daemon removes a sandbox when the process that created it dies, however it dies (SIGKILL included). Needs /bin/sh in the image; kept sandboxes stay. False: only orphan reaping and `sandbox prune` remove them. |
 | `host_max_sandboxes` | int \| None | `None` | Most sandboxes in use at once on this host, counted across every AgentBox process on it (trainer workers, ranks); rollouts wait for a free slot. Idle warm-pool containers are not counted. None: no host-wide cap. |
 | `host_slot_timeout_s` | float | `1800.0` | Longest wait for a host slot; provisioning then fails as an infra error. |
 

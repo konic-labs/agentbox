@@ -158,20 +158,38 @@ sandboxes in use ([verl](integrations/verl.md#throughput)).
   `metadata.kept_sandbox`, and `agentbox traj show` prints it together with
   the command to open a shell.
 - Containers created by a process are tracked and removed when it exits.
-- A process killed without running its exit handlers leaves its sandboxes
-  behind. Ray SIGKILLs trainer workers at the end of every verl, OpenRLHF and
-  SkyRL run, for example, and the warm-pool containers they held stay. The
-  first process to use Docker afterwards removes, in the background, the
-  containers of dead processes on this host. Live processes' containers and
-  kept sandboxes are never touched. Set `AGENTBOX_REAP_ORPHANS=0` to disable
-  this.
-- Launchers remove those orphans right after training with
-  `agentbox sandbox prune` (`python -m agentbox sandbox prune` where the
-  venv's scripts are not on `PATH`). On a Ray cluster, `--ray-address auto`
-  runs the prune on every node, because each node judges the owner labels
-  against its own processes. The example launch scripts do this. It connects
-  as any Ray client: where `ray start` turned on token authentication (the
-  default in Ray 2.59), set `RAY_AUTH_MODE=token`, as your training jobs do.
+- **Sandboxes die with their owner** (`die_with_owner`, on by default). The
+  process that creates a sandbox holds its stdin open through an attach
+  stream, and the container's main process watches it. When the owner dies,
+  however it dies, the kernel closes the stream, the daemon closes stdin, and
+  the container exits and is removed (`AutoRemove`). Ray SIGKILLs trainer
+  workers at the end of every verl, OpenRLHF and SkyRL run: a process holding
+  68 sandboxes, in use and pooled, left none 0.25 s after its SIGKILL, and a
+  verl run on two GPUs left none without any prune. Creating a sandbox is no
+  slower (68 ms at the median either way).
+  - The image needs `/bin/sh`. The configured `command` still runs, in the
+    background, and kept sandboxes (`keep_on_failure`, `sandbox up`) are told
+    to stay before their owner lets go.
+  - Each bound sandbox holds one file descriptor in its owner: 200 sandboxes
+    in one process held 221 in all. Raise `ulimit -n` for a few hundred.
+  - A process forked after creating sandboxes lets go of its copies of the
+    streams, so the sandboxes stay tied to the process that created them.
+  - Image builders and probes, which last seconds and are committed into
+    cached images, are not bound.
+- Orphan reaping covers the rest: containers from before this setting, or
+  with `die_with_owner: false`, or created by a process that died before it
+  attached. The first process to use Docker afterwards removes, in the
+  background, the containers of dead processes on this host. Live processes'
+  containers and kept sandboxes are never touched. Set
+  `AGENTBOX_REAP_ORPHANS=0` to disable this.
+- `agentbox sandbox prune` does the same on demand
+  (`python -m agentbox sandbox prune` where the venv's scripts are not on
+  `PATH`). On a Ray cluster, `--ray-address auto` runs the prune on every
+  node, because each node judges the owner labels against its own processes.
+  The example launch scripts still run it after training, as a fallback. It
+  connects as any Ray client: where `ray start` turned on token
+  authentication (the default in Ray 2.59), set `RAY_AUTH_MODE=token`, as
+  your training jobs do.
 - Every container is labelled `agentbox=1`, `agentbox.owner=<host:pid>`,
   `agentbox.created`, `agentbox.role`, and per rollout `agentbox.task_id`,
   `agentbox.run_id`, `agentbox.rollout_id` and `agentbox.group_id`. The owner

@@ -21,6 +21,12 @@
   still works)
 
 ### Sandboxes
+- Sandboxes die with the process that created them (`sandbox.die_with_owner`,
+  on by default, #111). The owner holds each container's stdin through an
+  attach stream. When it dies, even by SIGKILL, the daemon closes stdin and
+  removes the container. A process holding 68 sandboxes left none 0.25 s
+  after its SIGKILL, and a verl run left none without its prune step. Kept
+  sandboxes stay; images need `/bin/sh`
 - `sandbox.host_max_sandboxes`: a cap on the sandboxes in use on a host,
   across every AgentBox process on it, held with flock slots that a killed
   process releases; the wait is recorded as `metrics.sandbox_wait_s`
