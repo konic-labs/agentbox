@@ -27,6 +27,10 @@
   removes the container. A process holding 68 sandboxes left none 0.25 s
   after its SIGKILL, and a verl run left none without its prune step. Kept
   sandboxes stay; images need `/bin/sh`
+- Host slots live in `/tmp/agentbox-slots-<uid>` (private, mode 0700), not
+  `/dev/shm`. Once the user's last login session was gone, systemd-logind
+  deleted the `/dev/shm` files under training that ran outside a session
+  (systemd service, cron, Slurm), and the cap stopped counting (#115)
 - `sandbox.host_max_sandboxes`: a cap on the sandboxes in use on a host,
   across every AgentBox process on it, held with flock slots that a killed
   process releases; the wait is recorded as `metrics.sandbox_wait_s`
