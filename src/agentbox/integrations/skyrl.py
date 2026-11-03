@@ -90,14 +90,27 @@ class AgentBoxTextEnvCore:
         self.env.close()
 
 
+def row_extras(extras: dict[str, Any] | None) -> dict[str, Any]:
+    """The task fields of a dataset row as SkyRL passes them to the environment.
+
+    SkyRL hands every column other than ``prompt`` and ``env_class`` to the env,
+    so ``agentbox_task`` / ``task_id`` are top-level columns. Rows that nest them
+    under an ``extras`` column work too.
+    """
+    extras = dict(extras or {})
+    nested = extras.pop("extras", None)
+    if isinstance(nested, dict) and not ({"agentbox_task", "task_id"} & extras.keys()):
+        extras.update(nested)
+    return extras
+
+
 def _build() -> type:
     from skyrl_gym.envs.base_text_env import BaseTextEnv
 
     class AgentBoxTextEnv(BaseTextEnv):  # type: ignore[misc]
         def __init__(self, env_config: Any = None, extras: dict[str, Any] | None = None) -> None:
             super().__init__()
-            extras = extras or {}
-            task = task_from_kwargs({"extra_info": extras})
+            task = task_from_kwargs({"extra_info": row_extras(extras)})
             self._core = AgentBoxTextEnvCore(task)
             self.max_turns = self._core.max_turns
 

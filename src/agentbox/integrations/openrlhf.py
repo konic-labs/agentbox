@@ -170,6 +170,8 @@ def __getattr__(name: str) -> Any:
                 max_length: int,
                 hf_tokenizer: Any,
                 llm_engine: Any,
+                images: Any = None,  # OpenRLHF >= 0.11 passes it; episodes are text-only
+                **_: Any,
             ) -> dict[str, Any]:
                 return await run_episode(
                     prompt, label, sampling_params, max_length, hf_tokenizer, llm_engine
