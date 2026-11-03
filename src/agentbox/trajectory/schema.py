@@ -92,6 +92,7 @@ class TrajectoryMetrics(BaseModel):
     total_tokens: int | None = None
     cached_tokens: int | None = None
     duration_s: float = 0.0
+    sandbox_wait_s: float | None = None  # waiting for a host slot (host_max_sandboxes)
     sandbox_create_s: float | None = None
     verify_s: float | None = None
     seed_s: float | None = None

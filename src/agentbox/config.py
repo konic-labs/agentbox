@@ -145,6 +145,20 @@ class SandboxConfig(BaseModel):
     warm_pool_ttl_s: float = Field(
         default=300.0, gt=0, description="Idle pooled containers are removed after this long."
     )
+    host_max_sandboxes: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Most sandboxes in use at once on this host, counted across every AgentBox "
+            "process on it (trainer workers, ranks); rollouts wait for a free slot. Idle "
+            "warm-pool containers are not counted. None: no host-wide cap."
+        ),
+    )
+    host_slot_timeout_s: float = Field(
+        default=1800.0,
+        gt=0,
+        description="Longest wait for a host slot; provisioning then fails as an infra error.",
+    )
 
 
 class ModelConfig(BaseModel):
