@@ -141,3 +141,36 @@ def test_skyrl_core_with_remote_sandboxes(served: Any) -> None:
     out = core.step("Fixed.")
     assert out["done"] and out["reward"] == 1.0 and out["metadata"]["infra_failure"] is False
     assert served.state.sessions == {}
+
+
+async def test_server_shutdown_removes_its_warm_pool() -> None:
+    """uvicorn re-raises SIGTERM after shutdown, skipping atexit: the lifespan must clean up."""
+    if not _docker_available():
+        pytest.skip("Docker is not available")
+    pytest.importorskip("fastapi")
+    import asyncio
+    import time
+
+    import httpx
+
+    from agentbox.sandbox.backend import get_backend, owner_label
+    from agentbox.server.app import ServerSettings, create_app
+
+    def mine() -> int:
+        owner = f"agentbox.owner={owner_label()}"
+        return len(get_backend().list_containers_sync([owner]))
+
+    app = create_app(ServerSettings(sandbox=SandboxConfig(warm_pool=2, ensure_pytest=False)))
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t", timeout=120) as c:
+            sid = (await c.post("/v1/sessions", json={"task": TASK.model_dump(mode="json")})).json()
+            await c.delete(f"/v1/sessions/{sid['session_id']}")
+        deadline = time.monotonic() + 30
+        while mine() < 2 and time.monotonic() < deadline:  # the pool refills in the background
+            await asyncio.sleep(0.2)
+        assert mine() >= 2
+    deadline = time.monotonic() + 15
+    while mine() and time.monotonic() < deadline:  # creations in flight are dropped on arrival
+        await asyncio.sleep(0.2)
+    assert mine() == 0

@@ -314,6 +314,13 @@ _POOLS: weakref.WeakKeyDictionary[DockerBackend, WarmPool] = weakref.WeakKeyDict
 _POOLS_LOCK = threading.Lock()
 
 
+def close_pool(backend: DockerBackend) -> int:
+    """Remove the idle containers of ``backend``'s pool, if it has one; returns how many."""
+    with _POOLS_LOCK:
+        pool = _POOLS.get(backend)
+    return pool.close_sync() if pool is not None else 0
+
+
 def pool_for(backend: DockerBackend, *, ttl_s: float | None = None) -> WarmPool:
     """The warm pool attached to ``backend`` (created on first use)."""
     with _POOLS_LOCK:
