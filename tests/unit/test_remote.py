@@ -203,3 +203,12 @@ async def test_verl_remote_failures_are_never_trained(monkeypatch: pytest.Monkey
     assert out.extra_fields["agentbox"]["infra_failure"] is True
     assert out.extra_fields["agentbox"]["failure_kind"] == "sandbox"
     assert all("sandbox server is unavailable" in t for t in out.extra_fields["t"])
+
+
+def test_skyrl_rows_carry_the_task_at_top_level_or_nested() -> None:
+    from agentbox.integrations.skyrl import row_extras
+
+    blob = _task().model_dump_json()
+    assert row_extras({"agentbox_task": blob, "data_source": "x"})["agentbox_task"] == blob
+    assert row_extras({"extras": {"agentbox_task": blob}})["agentbox_task"] == blob
+    assert row_extras(None) == {}
