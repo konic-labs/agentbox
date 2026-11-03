@@ -49,7 +49,17 @@ T = TypeVar("T")
 
 EXEC_MARKER_ENV = "AGENTBOX_EXEC_ID"
 CACHE_REPOSITORY = "agentbox-cache"
-OWNER = f"{socket.gethostname()}:{os.getpid()}"
+
+
+def owner_label() -> str:
+    """``host:pid`` of the calling process, recorded as ``agentbox.owner``.
+
+    Computed per call, not at import: a process forked after importing AgentBox
+    must not label its sandboxes with its parent's pid, or orphan reaping would
+    tie their lifetime to the wrong process.
+    """
+    return f"{socket.gethostname()}:{os.getpid()}"
+
 
 # Go os.FileMode bits reported by the archive stat header.
 _GO_MODE_DIR = 1 << 31
@@ -328,6 +338,8 @@ class DockerBackend:
         self._live_guard = threading.Lock()
         self._cache_used: dict[str, float] = {}
         self.closed = False
+        # a forked child inherits this object without its threads or its sandboxes
+        self.pid = os.getpid()
         _BACKENDS.add(self)
 
     # ------------------------------------------------------------------ pools
@@ -580,7 +592,7 @@ class DockerBackend:
     def _labels(self, extra: Mapping[str, str] | None = None) -> dict[str, str]:
         labels = {
             "agentbox": "1",
-            "agentbox.owner": OWNER,
+            "agentbox.owner": owner_label(),
             "agentbox.created": str(int(time.time())),
             "agentbox.role": "sandbox",
         }
@@ -972,11 +984,16 @@ def get_backend() -> DockerBackend:
 
     The first backend of a process also removes, in the background, sandboxes
     left behind by dead processes on this host (``AGENTBOX_REAP_ORPHANS=0``
-    disables it).
+    disables it). A forked child gets its own backend: the inherited one has no
+    worker threads in the child, and its sandboxes belong to the parent.
     """
     global _default_backend, _reaped
     with _default_lock:
-        if _default_backend is None or _default_backend.closed:
+        if (
+            _default_backend is None
+            or _default_backend.closed
+            or _default_backend.pid != os.getpid()
+        ):
             _default_backend = DockerBackend()
             if not _reaped and os.environ.get("AGENTBOX_REAP_ORPHANS", "1") != "0":
                 _reaped = True
@@ -1001,6 +1018,8 @@ def get_client(docker_client: Any | None = None) -> Any:
 @atexit.register
 def _cleanup_at_exit() -> None:  # pragma: no cover - exercised at interpreter exit
     for backend in list(_BACKENDS):
+        if backend.pid != os.getpid():  # inherited through fork: the parent's sandboxes
+            continue
         try:
             removed = backend.cleanup_live_sync()
             if removed:
