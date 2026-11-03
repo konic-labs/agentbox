@@ -19,6 +19,7 @@ export RAY_memory_usage_threshold=0.97 PYTORCH_CUDA_ALLOC_CONF=expandable_segmen
 export MALLOC_MMAP_THRESHOLD_=1048576
 STEPS=${STEPS:-30}
 
+status=0
 python -m verl.trainer.main_ppo \
   algorithm.adv_estimator=grpo \
   data.train_files="$DATA/train.parquet" data.val_files="$DATA/val.parquet" \
@@ -58,4 +59,8 @@ python -m verl.trainer.main_ppo \
   trainer.total_training_steps="$STEPS" trainer.test_freq=5 trainer.val_before_train=True \
   trainer.save_freq="$STEPS" trainer.default_local_dir="${CKPT:-$PWD/checkpoints/agentbox}" \
   trainer.rollout_data_dir="$PWD/rollouts" \
-  "$@"
+  "$@" || status=$?
+
+# Ray SIGKILLs the agent-loop workers at the end: remove the sandboxes they still hold
+python -m agentbox sandbox prune || true
+exit "$status"

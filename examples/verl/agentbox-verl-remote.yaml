@@ -1,0 +1,18 @@
+# AgentBox settings for verl workers whose sandboxes live on an `agentbox serve` host.
+# The GPU nodes need no Docker. Start the server on the sandbox host with the sandbox section
+# of agentbox-verl.yaml:
+#
+#   export AGENTBOX_SERVER_TOKEN=$(openssl rand -hex 16)      # the same value on both sides
+#   agentbox -C examples/verl/agentbox-verl.yaml serve --host 0.0.0.0 --port 8765 --max-sessions 64
+#
+# --max-sessions at or below the sandbox section's host_max_sandboxes keeps clients waiting on
+# 429 rather than on a slow request.
+remote:
+  url: http://127.0.0.1:8765        # the sandbox host
+  token_env: AGENTBOX_SERVER_TOKEN
+agent:                              # sent with every session: the server runs these tools
+  tools: [list_files, read_file, write_file, run_tests]
+  episode_timeout_s: 600
+  tool_timeout_s: 60
+rewards:                            # registered reward names only
+  - {name: verifier}

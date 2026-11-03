@@ -2,6 +2,7 @@
 sandbox:
   limits: {cpu_count: 1.0, memory_mb: 512, network_disabled: true}
   warm_pool: 8                      # pre-started containers per agent-loop worker
+  host_max_sandboxes: 64            # in use at once on a node, across all its workers
 agent:
   tools: [list_files, read_file, write_file, run_tests]
   episode_timeout_s: 600
