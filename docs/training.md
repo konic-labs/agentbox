@@ -122,6 +122,33 @@ Two practical consequences for GRPO-style training:
   those rollouts with an infrastructure `failure_kind`, retries them, and keeps
   them out of exports and adapters' rewards.
 
+## Multi-GPU and multi-node
+
+Every trainer runs one AgentBox process per worker: a verl agent-loop worker,
+an OpenRLHF vLLM engine, a TRL rank, SkyRL's trainer. Each process has its
+own Docker client and warm pool. Three choices decide how that scales:
+
+| Question | Default | For many workers |
+| --- | --- | --- |
+| Where do sandboxes run? | the local Docker of each node | a `remote` settings section: GPU nodes call an `agentbox serve` host and need no Docker ([server](server.md#trainer-adapters)) |
+| How many at once? | as many as the batch starts | `sandbox.host_max_sandboxes` caps a node across all its workers ([sandbox](sandbox.md#host-wide-cap)) |
+| How do workers get the settings? | `$AGENTBOX_*_CONFIG` holds a path | on a Ray cluster started with `ray start`, workers do not inherit the launching shell: pass the variables in `runtime_env.env_vars`, and when nodes share no filesystem, put the settings text itself in the variable |
+
+- Tasks travel inside the dataset rows by default (`embed_task=True`), so no
+  node needs the task files. `$AGENTBOX_TASKS` with task ids only must be
+  readable on every node.
+- Ray stops trainer workers with SIGKILL. Run
+  `agentbox sandbox prune --ray-address auto` after training to remove what
+  they left on every node, mostly warm-pool containers. The example launch
+  scripts do this.
+- Export `AGENTBOX_SERVER_TOKEN` before `ray start` on every node rather than
+  putting it on a command line.
+
+Tested launchers, with measured step times, sandbox counts and reward curves on
+two GPUs: [verl](integrations/verl.md#multi-gpu-a-tested-recipe),
+[OpenRLHF](integrations/openrlhf.md), [SkyRL](integrations/skyrl.md) and
+[TRL](integrations/trl.md#several-gpus).
+
 ## Throughput checklist
 
 - Warm the caches before training: `agentbox cache warm tasks/` (setup

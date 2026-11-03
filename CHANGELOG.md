@@ -1,5 +1,50 @@
 # Changelog
 
+## Unreleased — multi-GPU and multi-node training (#98)
+
+### Trainer integrations
+- Tested launchers on two GPUs for verl (`examples/verl/run_grpo_multi_gpu.sh`:
+  replicas or tensor parallel, several nodes, remote sandboxes), OpenRLHF
+  (`examples/openrlhf/run.sh`), SkyRL (`examples/skyrl/`) and TRL
+  (`examples/trl/run_multi_gpu.sh`: DDP, ZeRO-2, vLLM colocated or as a
+  server), with step times, sandbox counts and reward curves in the guides
+- Remote sandboxes for the verl, OpenRLHF and SkyRL adapters: a `remote`
+  settings section sends every episode to an `agentbox serve` host, so GPU
+  nodes need no Docker. OpenRLHF keeps its token-in/token-out loop on the
+  engine and runs only tools and the verifier remotely (`remote_rollout`)
+- Adapter settings (`agentbox.integrations.settings`) accept the YAML/JSON
+  text in the environment variable, for Ray `runtime_env` on clusters without
+  a shared filesystem
+- OpenRLHF 0.11 passes `images=` to agent executors; the executor accepts it
+- SkyRL 0.4 passes dataset columns to environments as top-level extras; the
+  task is now read from a top-level `agentbox_task` column (nested `extras`
+  still works)
+
+### Sandboxes
+- `sandbox.host_max_sandboxes`: a cap on the sandboxes in use on a host,
+  across every AgentBox process on it, held with flock slots that a killed
+  process releases; the wait is recorded as `metrics.sandbox_wait_s`
+- `agentbox sandbox prune --ray-address auto` prunes orphans on every node of
+  a Ray cluster; the example launchers run a prune after training, because Ray
+  SIGKILLs trainer workers and their warm pools stayed
+- Owner labels name the process that created the sandbox, a forked child
+  included, and a forked child never removes its parent's sandboxes at exit
+- `python -m agentbox` runs the CLI
+
+### Server
+- `RemoteEnv` retries only where it is safe: sessions wait while the server
+  is full (429) and retry provisioning failures; tool calls are retried only
+  when the request never reached the server. Clients send their agent config
+  and registered rewards with each session, and share one connection pool per
+  process
+- `--max-sessions` counts sessions that are still being provisioned; 429
+  carries `Retry-After`
+- The server refuses client-supplied code to import on its host (a reward
+  `module:function`, a task's custom `reward_fn`) unless started with
+  `--allow-client-callables`
+- The server removes its warm pool on shutdown (uvicorn's re-raised SIGTERM
+  skipped the exit handlers)
+
 ## 0.3.0 — trainer-agnostic RL infrastructure
 
 AgentBox is no longer ART-first: one sandbox, tool, reward and trajectory
