@@ -304,6 +304,7 @@ $ agentbox sandbox prune [OPTIONS]
 * `--run-id <str>`
 * `--older-than <str>`: e.g. 2h
 * `--dry-run`
+* `--ray-address <str>`: Prune on every node of this Ray cluster (e.g. auto), not only here
 * `--help`: Show this message and exit.
 
 ## `agentbox cache`
