@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+import stat
 import subprocess
 import sys
 import textwrap
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -17,6 +19,7 @@ import pytest
 from agentbox.config import SandboxConfig
 from agentbox.runner import provision as provision_mod
 from agentbox.runner.provision import ProvisionError, provision, release
+from agentbox.sandbox import slots as slots_mod
 from agentbox.sandbox.slots import HostSlots, host_slots
 from agentbox.tasks.schema import Task, VerifierSpec
 from agentbox.types import FailureKind
@@ -119,6 +122,72 @@ async def test_cancelled_waiter_leaks_nothing(tmp_path: Path) -> None:
 def test_host_slots_is_shared_per_process(_slots_dir: Path) -> None:
     assert host_slots(3) is host_slots(3)
     assert host_slots(3).directory.parent == _slots_dir
+
+
+# ------------------------------------------------------- where the slots live (GH #115)
+def test_the_default_directory_is_a_private_one_in_tmp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not /dev/shm: systemd-logind deletes a user's /dev/shm files when they log out."""
+    monkeypatch.delenv("AGENTBOX_SLOTS_DIR")
+    if os.access("/tmp", os.W_OK):
+        assert slots_mod.default_slots_dir() == Path("/tmp") / f"agentbox-slots-{os.getuid()}"
+    monkeypatch.setattr(slots_mod, "_SHARED_TMP", tmp_path)
+    base = tmp_path / f"agentbox-slots-{os.getuid()}"
+    base.mkdir(mode=0o755)  # left too open, e.g. by an older layout
+    directory = slots_mod.slots_directory()
+    assert directory.parent == base
+    assert stat.S_IMODE(os.stat(base).st_mode) == 0o700
+    assert HostSlots(1).directory == directory
+
+
+def test_a_slot_directory_someone_else_planted_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("AGENTBOX_SLOTS_DIR")
+    monkeypatch.setattr(slots_mod, "_SHARED_TMP", tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (tmp_path / f"agentbox-slots-{os.getuid()}").symlink_to(elsewhere)
+    with pytest.raises(RuntimeError, match="AGENTBOX_SLOTS_DIR"):
+        slots_mod.slots_directory()
+
+
+def test_a_slot_file_unlinked_while_locking_is_taken_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A flock on a file deleted meanwhile is a lock no other process can see."""
+    slots = HostSlots(1, directory=tmp_path / "s")
+    real_flock = slots_mod.fcntl.flock
+    locked: list[int] = []
+
+    def flock(fd: int, op: int) -> None:
+        real_flock(fd, op)
+        if not locked:  # the first file disappears right after we lock it
+            os.unlink(slots._path(0))
+        locked.append(fd)
+
+    with monkeypatch.context() as m:
+        m.setattr(slots_mod.fcntl, "flock", flock)
+        lease = slots.try_acquire()
+    assert lease is not None and len(locked) == 2
+    assert lease._fd is not None
+    assert os.fstat(lease._fd).st_ino == os.stat(slots._path(0)).st_ino  # the live file
+    assert HostSlots(1, directory=tmp_path / "s").try_acquire() is None  # others see it held
+    lease.release()
+
+
+def test_taking_a_slot_refreshes_its_mtime(tmp_path: Path) -> None:
+    """Age-based /tmp cleaners must not remove a slot that is being used."""
+    slots = HostSlots(1, directory=tmp_path / "s")
+    first = slots.try_acquire()
+    assert first is not None
+    first.release()
+    os.utime(slots._path(0), (0, 0))  # as if untouched for decades
+    lease = slots.try_acquire()
+    assert lease is not None
+    assert time.time() - os.stat(slots._path(0)).st_mtime < 60
+    lease.release()
 
 
 # ---------------------------------------------------------------- provisioning

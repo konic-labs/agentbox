@@ -133,10 +133,22 @@ sandbox:
   host_slot_timeout_s: 1800  # then provisioning fails as an infra error
 ```
 
-- The cap is a directory of lock files in `/dev/shm` (`$AGENTBOX_SLOTS_DIR`),
-  one namespace per Docker daemon. A sandbox holds a lock from provisioning
-  until it is removed. The kernel releases the lock when its process dies, so
-  a SIGKILLed worker never keeps a slot.
+- The cap is a directory of lock files, one namespace per Docker daemon. A
+  sandbox holds a lock from provisioning until it is removed. The kernel
+  releases the lock when its process dies, so a SIGKILLed worker never keeps
+  a slot.
+- The directory is `/tmp/agentbox-slots-<uid>`, private to the user (mode
+  0700); `$AGENTBOX_SLOTS_DIR` overrides it, for every process on the host
+  alike.
+  - Not `/dev/shm`: systemd-logind (`RemoveIPC=yes`, the default for regular
+    users) deletes a user's files there once their last login session and its
+    processes are gone. Training that runs outside any session, such as a
+    systemd service or a cron or Slurm job running as that user, would lose
+    its slots then, and the cap would silently stop counting.
+  - A directory there that is a symlink or belongs to another user is
+    refused.
+  - Taking a slot refreshes its file, so age-based `/tmp` cleaners leave it
+    alone.
 - Rollouts that find no free slot wait in FIFO order. The wait is recorded as
   `metrics.sandbox_wait_s`.
 - Idle warm-pool containers are not counted: they hold no CPU time and only

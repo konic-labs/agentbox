@@ -3,9 +3,10 @@
 Distributed trainers run one AgentBox process per worker: verl agent-loop
 workers, OpenRLHF vLLM engines, TRL ranks. A per-process limit multiplies with
 the number of workers, so this cap lives on the host instead. It is ``limit``
-lock files in a directory, and each sandbox holds an exclusive ``flock`` on one
-of them for as long as it lives. The kernel drops a lock when its process dies,
-so a crashed or SIGKILLed worker never keeps a slot.
+lock files in a private directory under /tmp, and each sandbox holds an
+exclusive ``flock`` on one of them for as long as it lives. The kernel drops a
+lock when its process dies, so a crashed or SIGKILLed worker never keeps a
+slot.
 
 Waiting is FIFO per event loop: one poller task per loop scans the slot files
 with a short backoff and hands each free slot to the oldest waiter, so a
@@ -19,6 +20,7 @@ import errno
 import os
 import random
 import re
+import stat
 import tempfile
 import threading
 import time
@@ -34,22 +36,74 @@ except ImportError:  # pragma: no cover - Windows
 SLOTS_DIR_ENV = "AGENTBOX_SLOTS_DIR"
 _POLL_MIN_S = 0.005
 _POLL_MAX_S = 0.2
+_SHARED_TMP = Path("/tmp")
 
 
 def default_slots_dir() -> Path:
-    """``$AGENTBOX_SLOTS_DIR``, else a per-user directory in /dev/shm (or the temp dir)."""
+    """``$AGENTBOX_SLOTS_DIR``, else ``/tmp/agentbox-slots-<uid>``.
+
+    Not /dev/shm: systemd-logind (``RemoveIPC=yes``, the default for regular
+    users) deletes a user's /dev/shm files once their last login session and
+    its processes are gone. Slot holders outside any session, such as a
+    systemd service or a cron or Slurm job running as that user, then lost
+    their slot files and the cap with them (GH #115). The fixed /tmp, not
+    ``$TMPDIR``, so that every process on the host agrees whatever its
+    environment.
+    """
     override = os.environ.get(SLOTS_DIR_ENV)
     if override:
         return Path(override)
-    shm = Path("/dev/shm")
-    base = shm if shm.is_dir() and os.access(shm, os.W_OK) else Path(tempfile.gettempdir())
+    tmp = _SHARED_TMP
+    base = tmp if tmp.is_dir() and os.access(tmp, os.W_OK) else Path(tempfile.gettempdir())
     return base / f"agentbox-slots-{os.getuid()}"
+
+
+def _private_dir(path: Path) -> None:
+    """Create ``path`` for this user alone; refuse one that someone else controls.
+
+    The default lives in the shared /tmp, where another user could create it
+    first, or as a symlink, and hold every slot.
+    """
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    info = os.lstat(path)
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+        raise RuntimeError(
+            f"{path} is not a directory owned by this user: set ${SLOTS_DIR_ENV} to a private one"
+        )
+    if info.st_mode & 0o077:
+        os.chmod(path, 0o700)
+
+
+def slots_directory() -> Path:
+    """This host's slot directory for the current Docker daemon (private when defaulted)."""
+    base = default_slots_dir()
+    if not os.environ.get(SLOTS_DIR_ENV):
+        _private_dir(base)
+    return base / daemon_key()
 
 
 def daemon_key() -> str:
     """One slot namespace per Docker daemon (``$DOCKER_HOST``, else the local one)."""
     host = os.environ.get("DOCKER_HOST") or "local"
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", host)[:64]
+
+
+def _same_file(fd: int, path: Path) -> bool:
+    """Whether ``fd`` is still the file at ``path`` (the one other processes lock)."""
+    try:
+        held, current = os.fstat(fd), os.stat(path)
+    except FileNotFoundError:
+        return False
+    return (held.st_dev, held.st_ino) == (current.st_dev, current.st_ino)
+
+
+def _touch(fd: int) -> None:
+    """A fresh mtime: age-based /tmp cleaners (systemd-tmpfiles) leave held slots alone."""
+    if os.utime in os.supports_fd:
+        try:
+            os.utime(fd)
+        except OSError:  # pragma: no cover - a read-only directory still works
+            pass
 
 
 class SlotLease:
@@ -93,7 +147,7 @@ class HostSlots:
         if fcntl is None:  # pragma: no cover - Windows
             raise RuntimeError("host_max_sandboxes needs flock (Linux or macOS)")
         self.limit = limit
-        self.directory = directory or default_slots_dir() / daemon_key()
+        self.directory = directory or slots_directory()
         self.directory.mkdir(parents=True, exist_ok=True)
         # keyed by id(loop): some loops (uvloop) cannot be weakly referenced; an entry
         # lives only while its loop has waiters
@@ -108,16 +162,26 @@ class HostSlots:
         """Take a free slot without waiting, or return ``None``."""
         start = random.randrange(self.limit)
         for k in range(self.limit):
-            index = (start + k) % self.limit
-            fd = os.open(self._path(index), os.O_RDWR | os.O_CREAT, 0o600)
+            lease = self._take((start + k) % self.limit)
+            if lease is not None:
+                return lease
+        return None
+
+    def _take(self, index: int) -> SlotLease | None:
+        path = self._path(index)
+        for _ in range(2):  # once more if the file was replaced between open and flock
+            fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError as exc:
                 os.close(fd)
                 if exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES):
-                    continue
+                    return None
                 raise
-            return SlotLease(fd, index)
+            if _same_file(fd, path):
+                _touch(fd)
+                return SlotLease(fd, index)
+            os.close(fd)  # locked a file that was unlinked meanwhile: nobody else sees it
         return None
 
     def in_use(self) -> int:
@@ -220,7 +284,7 @@ _SLOTS_LOCK = threading.Lock()
 
 def host_slots(limit: int) -> HostSlots:
     """The process-wide :class:`HostSlots` for ``limit`` slots on this host."""
-    directory = default_slots_dir() / daemon_key()
+    directory = slots_directory()
     key = (limit, str(directory))
     with _SLOTS_LOCK:
         slots = _SLOTS.get(key)
