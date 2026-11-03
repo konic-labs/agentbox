@@ -1,0 +1,13 @@
+# AgentBox settings read where SkyRL builds its environments ($AGENTBOX_SKYRL_CONFIG)
+sandbox:
+  limits: {cpu_count: 1.0, memory_mb: 512, network_disabled: true}
+  warm_pool: 8
+  host_max_sandboxes: 64
+agent:
+  tools: [list_files, read_file, write_file, run_tests]
+  max_steps: 6                      # assistant turns; keep it equal to generator.max_turns
+  episode_timeout_s: 600
+  tool_timeout_s: 60
+  max_tool_output_chars: 4000
+rewards:
+  - {name: verifier}
