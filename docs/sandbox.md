@@ -118,6 +118,38 @@ Measured with 64 rollouts at concurrency 8 on a 4-vCPU host: time to the first
 model call fell from 0.31 s to 0.04 s at the median, and wall clock went from
 16.6 s to 14.8 s ([performance](performance.md)).
 
+## Host-wide cap
+
+Distributed trainers run one AgentBox process per worker: verl agent-loop
+workers, OpenRLHF vLLM engines, TRL ranks. A per-process limit multiplies with
+the number of workers, and a large GRPO batch starts every rollout at once.
+`host_max_sandboxes` bounds the sandboxes in use on a host, counted across
+every AgentBox process on it:
+
+```yaml
+sandbox:
+  warm_pool: 8
+  host_max_sandboxes: 64     # all workers on this node together
+  host_slot_timeout_s: 1800  # then provisioning fails as an infra error
+```
+
+- The cap is a directory of lock files in `/dev/shm` (`$AGENTBOX_SLOTS_DIR`),
+  one namespace per Docker daemon. A sandbox holds a lock from provisioning
+  until it is removed. The kernel releases the lock when its process dies, so
+  a SIGKILLed worker never keeps a slot.
+- Rollouts that find no free slot wait in FIFO order. The wait is recorded as
+  `metrics.sandbox_wait_s`.
+- Idle warm-pool containers are not counted: they hold no CPU time and only
+  their memory limit. The containers on a node stay below
+  `host_max_sandboxes + workers × warm_pool`.
+- A trainer that holds every sandbox of a batch until the batch ends (TRL
+  provisions all of a step's environments first) needs a cap at least as large
+  as its per-node batch. A smaller cap waits for `host_slot_timeout_s` and
+  then fails those rollouts as infra failures.
+
+With 256 rollouts per step on two GPUs, a cap of 64 kept the node at 64
+sandboxes in use ([verl](integrations/verl.md#throughput)).
+
 ## Lifecycle and cleanup
 
 - `auto_remove` (default true) removes each sandbox after its rollout.
@@ -127,18 +159,28 @@ model call fell from 0.31 s to 0.04 s at the median, and wall clock went from
   the command to open a shell.
 - Containers created by a process are tracked and removed when it exits.
 - A process killed without running its exit handlers leaves its sandboxes
-  behind; Ray SIGKILLs trainer workers at the end of every verl run, for
-  example. The first process to use Docker afterwards removes, in the
-  background, the containers of dead processes on this host. Live processes'
-  containers and kept sandboxes are never touched. Set
-  `AGENTBOX_REAP_ORPHANS=0` to disable this.
+  behind. Ray SIGKILLs trainer workers at the end of every verl, OpenRLHF and
+  SkyRL run, for example, and the warm-pool containers they held stay. The
+  first process to use Docker afterwards removes, in the background, the
+  containers of dead processes on this host. Live processes' containers and
+  kept sandboxes are never touched. Set `AGENTBOX_REAP_ORPHANS=0` to disable
+  this.
+- Launchers remove those orphans right after training with
+  `agentbox sandbox prune` (`python -m agentbox sandbox prune` where the
+  venv's scripts are not on `PATH`). On a Ray cluster, `--ray-address auto`
+  runs the prune on every node, because each node judges the owner labels
+  against its own processes. The example launch scripts do this. It connects
+  as any Ray client: where `ray start` turned on token authentication (the
+  default in Ray 2.59), set `RAY_AUTH_MODE=token`, as your training jobs do.
 - Every container is labelled `agentbox=1`, `agentbox.owner=<host:pid>`,
   `agentbox.created`, `agentbox.role`, and per rollout `agentbox.task_id`,
-  `agentbox.run_id`, `agentbox.rollout_id` and `agentbox.group_id`.
+  `agentbox.run_id`, `agentbox.rollout_id` and `agentbox.group_id`. The owner
+  is the process that created the sandbox, a forked child included.
 
 ```bash
 agentbox sandbox ls                    # owner, age, orphan status (-a: builders and probes too)
 agentbox sandbox prune                 # orphans only: owner process is gone (kept sandboxes stay)
+agentbox sandbox prune --ray-address auto   # orphans on every node of a Ray cluster
 agentbox sandbox prune --run-id RUN    # one run's sandboxes
 agentbox sandbox prune --older-than 2h --dry-run
 agentbox sandbox prune --all           # every AgentBox container

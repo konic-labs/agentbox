@@ -121,14 +121,104 @@ negative budget.
 | Metrics are block-buffered under Ray | `PYTHONUNBUFFERED=1` |
 
 verl stops its workers with SIGKILL at the end of a run, so their exit handlers
-never run. The next AgentBox process removes the sandboxes they left behind
-([sandbox lifecycle](../sandbox.md#lifecycle-and-cleanup)), and
-`agentbox sandbox prune` does it on demand.
+never run. The script then removes the sandboxes they left behind, warm-pool
+containers mostly, with `agentbox sandbox prune`
+([sandbox lifecycle](../sandbox.md#lifecycle-and-cleanup)).
 
-## Multi-GPU
+## Multi-GPU: a tested recipe
 
-The same pieces scale out. Multi-GPU and multi-node runs are not validated
-yet; [#98](https://github.com/konic-labs/agentbox/issues/98) tracks that.
+[`run_grpo_multi_gpu.sh`](../../examples/verl/run_grpo_multi_gpu.sh) runs the
+same training on every GPU of a node, or on several nodes. Its algorithm
+settings are those of the single-GPU recipe: 8 tasks × 8 samples per step,
+learning rate 2e-6, six assistant turns, thinking on. It turns on padding
+removal and drops the small-host workarounds.
+
+```bash
+pip install "verl[vllm]==0.9.1" agentbox-rl          # and flash-attn for your torch and GPU
+python examples/verl/make_coding_tasks.py data/tasks
+python examples/verl/prepare_data.py --out data/verl
+STEPS=30 examples/verl/run_grpo_multi_gpu.sh         # one vLLM replica per GPU
+TP=2 examples/verl/run_grpo_multi_gpu.sh             # replicas span two GPUs
+```
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `GPUS` | every GPU | GPUs per node |
+| `NNODES` | 1 | nodes of a Ray cluster started beforehand with `ray start` |
+| `TP` | 1 | tensor parallel size of each vLLM replica |
+| `WORKERS` | 2 × GPUs × nodes | agent-loop workers, one AgentBox process each |
+| `AGENTBOX_VERL_CONFIG` | `agentbox-verl.yaml` | AgentBox settings; [`agentbox-verl-remote.yaml`](../../examples/verl/agentbox-verl-remote.yaml) for remote sandboxes |
+
+It was run on one node with 2× RTX PRO 6000 Blackwell (96 GB each, PCIe), 48
+vCPUs and 500 GB of RAM, using verl 0.9.1, vLLM 0.24, torch 2.11 on CUDA 13
+and flash-attn 2.8.3 built from source for sm_120.
+
+### Results on two GPUs
+
+30 steps, one vLLM replica per GPU, four agent-loop workers:
+
+| | One L4: run 1 / run 2 | Two RTX PRO 6000 |
+| --- | --- | --- |
+| Training reward, steps 1–5 → 25–29 | 0.56 → 0.82 / 0.57 → 0.86 | 0.57 → 0.88 |
+| Validation reward, before training → last validation | 0.59 → 0.85 / 0.70 → 0.89 | 0.70 → 0.76 (0.89 and 0.93 at steps 20 and 25) |
+| Response length in tokens, steps 1–5 → 25–29 | 1005 → 876 / 1021 → 805 | 1028 → 595 |
+| Time per step | 160 s / 150 s | 9.8 s |
+| Sandboxes in use at once, peak | | 64, plus up to 20 idle in warm pools |
+| Host RAM in use, peak | | 41 GB |
+
+The training reward follows the single-GPU curves: its 4-step means were
+0.60, 0.57, 0.65, 0.76, 0.85, 0.79 and 0.85. Validation on the 9 held-out tasks
+with greedy decoding moved between 0.67 and 0.93 from one evaluation to the
+next, so read a single point as ±0.1, as on one GPU. The answers shortened
+more than on one GPU. The 30 steps and seven validations took 8.9 minutes.
+
+### Throughput
+
+Steps 1–5 of each setup, 64 trajectories per step:
+
+| Setup | Step | Generation | Model update |
+| --- | --- | --- | --- |
+| 1 GPU | 17.4 s | 11.1 s | 4.6 s |
+| 2 GPUs, a replica each (`TP=1`) | 13.2 s | 9.3 s | 2.5 s |
+| 2 GPUs, one replica (`TP=2`) | 14.1 s | 10.2 s | 2.4 s |
+| 2 GPUs, remote sandboxes | 13.3 s | 9.5 s | 2.5 s |
+
+The model update halves with the second GPU, but generation barely changes:
+64 multi-turn episodes do not fill two GPUs, and a step waits for its slowest
+trajectories. At four times the batch, 32 tasks × 8 samples per step, the
+second GPU pays off (three steps each):
+
+| Setup | Step | Generation | Model update | Sandboxes in use, peak |
+| --- | --- | --- | --- | --- |
+| 1 GPU | 51.8 s | 27.7 s | 18.3 s | 256 |
+| 2 GPUs | 32.8 s | 19.6 s | 9.4 s | 256 |
+| 2 GPUs, `host_max_sandboxes: 64` | 35.3 s | 22.4 s | 9.3 s | 64 |
+
+Two GPUs ran 7.8 trajectories per second against 4.9 on one, 1.6 times as
+many. With the cap at 64, the 256 trajectories of a step never had more than
+64 sandboxes in use, plus 32 idle in the four workers' warm pools, and a step
+took 8% longer. No run left a container behind.
+
+### Remote sandboxes
+
+With `AGENTBOX_VERL_CONFIG=examples/verl/agentbox-verl-remote.yaml` and
+`agentbox serve` on the same node, five steps took 13.3 s each, against
+13.2 s with local sandboxes. A tool call took 0.124 s on average, against
+0.118 s locally over the same steps. The server created 344 sessions and
+refused or failed none. Across a network, each tool call and each episode's
+start and end add a round trip.
+
+### Settings that matter on several GPUs
+
+| Problem | Setting |
+| --- | --- |
+| On a cluster started with `ray start`, workers do not inherit the launching shell's environment | the script passes `AGENTBOX_VERL_CONFIG` and `AGENTBOX_TASKS` as `++ray_kwargs.ray_init.runtime_env.env_vars.*`; the config variable may hold one-line JSON when the nodes share no filesystem |
+| vLLM's custom all-reduce failed with `CUDA error ... custom_all_reduce.cuh: 'invalid argument'` at `TP=2` on our PCIe-connected pair | the script sets `+actor_rollout_ref.rollout.engine_kwargs.vllm.disable_custom_all_reduce=True` when `TP` > 1, and NCCL does the reductions |
+| Ray SIGKILLs the agent-loop workers: the 30-step run left 20 idle warm-pool containers | the script runs `agentbox sandbox prune` after training (`--ray-address auto` on several nodes); the runs after that change left none |
+| A large batch starts every sandbox at once | `sandbox.host_max_sandboxes` ([sandbox](../sandbox.md#host-wide-cap)) |
+| No flash-attn wheel exists for torch 2.11 / CUDA 13 / sm_120 | `FLASH_ATTN_CUDA_ARCHS=120 MAX_JOBS=44 pip wheel --no-build-isolation --no-cache-dir flash-attn==2.8.3` with `ninja` on `PATH`: about 4 minutes on 48 vCPUs, while without ninja it compiles one file at a time. `--no-cache-dir` keeps pip from reusing a wheel built against another torch |
+
+## Your own run
 
 ### 1. Dataset
 
@@ -157,22 +247,24 @@ task as JSON in `extra_info.agentbox_task`. For large datasets, pass
 
 ### 3. Sandbox, agent and reward settings
 
-Workers read `$AGENTBOX_VERL_CONFIG` (YAML or JSON), which has the same
-sections as `agentbox.yaml`
-([example](../../examples/verl/agentbox-verl.yaml)). Use the same tools as
-the dataset's system prompt. Tool schemas come from AgentBox, not from verl's
+Workers read `$AGENTBOX_VERL_CONFIG`: a path to a YAML or JSON file with the
+same sections as `agentbox.yaml`
+([example](../../examples/verl/agentbox-verl.yaml)), or that text itself. A
+`remote` section runs the sandboxes on an `agentbox serve` host
+([server](../server.md#trainer-adapters)). Use the same tools as the dataset's
+system prompt. Tool schemas come from AgentBox, not from verl's
 `tool_config_path`.
 
 ### 4. Train
 
 Start from
-[`run_grpo_single_gpu.sh`](../../examples/verl/run_grpo_single_gpu.sh), then
-raise `trainer.n_gpus_per_node`, the rollout's tensor parallel size, the batch
-size and the number of agent-loop workers. The memory-saving settings above
-are only needed on small hosts. `multi_turn.format`,
-`multi_turn.max_assistant_turns` and `agent.agent_loop_config_path` are read
-by verl's agent-loop code, and these switches have moved between verl
-releases. Check the multi-turn example of your version.
+[`run_grpo_single_gpu.sh`](../../examples/verl/run_grpo_single_gpu.sh) on one
+small GPU and from
+[`run_grpo_multi_gpu.sh`](../../examples/verl/run_grpo_multi_gpu.sh)
+otherwise. `multi_turn.format`, `multi_turn.max_assistant_turns` and
+`agent.agent_loop_config_path` are read by verl's agent-loop code, and these
+switches have moved between verl releases. Check the multi-turn example of
+your version.
 
 ## Behaviour
 
