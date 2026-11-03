@@ -1,7 +1,7 @@
 """Sandbox provisioning shared by Rollout, AgentBoxEnv and trainer integrations.
 
-create (or start from the setup snapshot) -> seed -> setup checks, with every
-failure attributed to a :class:`FailureKind`.
+host slot (``host_max_sandboxes``) -> create (or start from the setup snapshot)
+-> seed -> setup checks, with every failure attributed to a :class:`FailureKind`.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from typing import Any
 
 from agentbox.config import SandboxConfig
 from agentbox.sandbox.manager import SandboxManager
+from agentbox.sandbox.slots import SlotLease, host_slots
 from agentbox.sandbox.types import Sandbox
 from agentbox.tasks.schema import Task
 from agentbox.tasks.seeder import TaskSeeder
@@ -35,6 +36,8 @@ class Provisioned:
     config: SandboxConfig
     create_s: float = 0.0
     seed_s: float | None = None
+    wait_s: float | None = None  # time spent waiting for a host slot
+    lease: SlotLease | None = None
 
 
 def effective_sandbox(base: SandboxConfig, task: Task) -> SandboxConfig:
@@ -82,6 +85,68 @@ async def provision(
 ) -> Provisioned:
     """Create a seeded sandbox for ``task`` or raise :class:`ProvisionError`."""
     cfg = manager.config
+    lease: SlotLease | None = None
+    wait_s: float | None = None
+    if cfg.host_max_sandboxes:
+        t_wait = time.monotonic()
+        try:
+            lease = await host_slots(cfg.host_max_sandboxes).acquire(cfg.host_slot_timeout_s)
+        except TimeoutError as exc:
+            raise ProvisionError(
+                FailureKind.SANDBOX,
+                f"no host slot within {cfg.host_slot_timeout_s:.0f}s: {exc} "
+                f"(host_max_sandboxes={cfg.host_max_sandboxes})",
+            ) from exc
+        wait_s = time.monotonic() - t_wait
+    try:
+        sandbox, create_s, seed_s, cached_image = await _create(
+            task, manager, run_id=run_id, rollout_id=rollout_id, group_id=group_id
+        )
+    except BaseException:
+        if lease is not None:
+            lease.release()
+        raise
+    prov = Provisioned(
+        sandbox=sandbox,
+        manager=manager,
+        config=cfg,
+        create_s=create_s,
+        seed_s=seed_s,
+        wait_s=wait_s,
+        lease=lease,
+    )
+    try:
+        if cached_image is None:
+            seed = await TaskSeeder(manager).seed(sandbox, task)
+            prov.seed_s = seed.duration_s
+            if not seed.ok:
+                raise ProvisionError(FailureKind.SEED, seed.error or "task seed failed")
+        if setup_checks:
+            from agentbox.benchmark.setup_check import SetupChecker
+
+            check = await SetupChecker(manager).run(sandbox, setup_checks)
+            if not check.ok:
+                raise ProvisionError(
+                    FailureKind.SETUP_CHECK,
+                    check.error or "setup check failed",
+                    extra={"failed_check": check.failed_check},
+                )
+    except BaseException:
+        await release(prov, keep=False)
+        raise
+    return prov
+
+
+async def _create(
+    task: Task,
+    manager: SandboxManager,
+    *,
+    run_id: str,
+    rollout_id: str,
+    group_id: str | None,
+) -> tuple[Sandbox, float, float | None, str | None]:
+    """Build the setup snapshot if needed, then create the sandbox."""
+    cfg = manager.config
     t0 = time.monotonic()
     cached_image: str | None = None
     seed_s: float | None = None
@@ -115,45 +180,24 @@ async def provision(
         )
     except Exception as exc:
         raise ProvisionError(FailureKind.SANDBOX, str(exc)) from exc
-    prov = Provisioned(
-        sandbox=sandbox,
-        manager=manager,
-        config=cfg,
-        create_s=time.monotonic() - t_create,
-        seed_s=seed_s,
-    )
-    try:
-        if cached_image is None:
-            seed = await TaskSeeder(manager).seed(sandbox, task)
-            prov.seed_s = seed.duration_s
-            if not seed.ok:
-                raise ProvisionError(FailureKind.SEED, seed.error or "task seed failed")
-        if setup_checks:
-            from agentbox.benchmark.setup_check import SetupChecker
-
-            check = await SetupChecker(manager).run(sandbox, setup_checks)
-            if not check.ok:
-                raise ProvisionError(
-                    FailureKind.SETUP_CHECK,
-                    check.error or "setup check failed",
-                    extra={"failed_check": check.failed_check},
-                )
-    except BaseException:
-        await release(prov, keep=False)
-        raise
-    return prov
+    return sandbox, time.monotonic() - t_create, seed_s, cached_image
 
 
 async def release(prov: Provisioned, *, keep: bool) -> None:
-    if keep:
-        prov.manager.keep(prov.sandbox)
-        logger.warning(
-            "keeping sandbox %s; inspect with: docker exec -it %s sh",
-            prov.sandbox.name,
-            prov.sandbox.name,
-        )
-        return
+    """Destroy (or keep) the sandbox and free its host slot."""
     try:
-        await prov.manager.destroy(prov.sandbox)
-    except Exception as exc:  # pragma: no cover - teardown must not mask results
-        logger.warning("sandbox destroy failed for %s: %s", prov.sandbox.name, exc)
+        if keep:
+            prov.manager.keep(prov.sandbox)
+            logger.warning(
+                "keeping sandbox %s; inspect with: docker exec -it %s sh",
+                prov.sandbox.name,
+                prov.sandbox.name,
+            )
+            return
+        try:
+            await prov.manager.destroy(prov.sandbox)
+        except Exception as exc:  # pragma: no cover - teardown must not mask results
+            logger.warning("sandbox destroy failed for %s: %s", prov.sandbox.name, exc)
+    finally:
+        if prov.lease is not None:  # kept sandboxes leave the budget too
+            prov.lease.release()

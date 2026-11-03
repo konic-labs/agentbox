@@ -170,6 +170,7 @@ class AgentBoxEnv:
             group_id=group_id,
             setup_checks=self.setup_checks,
         )
+        self._metrics.sandbox_wait_s = self._prov.wait_s
         self._metrics.sandbox_create_s = self._prov.create_s
         self._metrics.seed_s = self._prov.seed_s
         self._task, self._cfg, self._executor = task, cfg, executor

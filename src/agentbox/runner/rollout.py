@@ -333,6 +333,7 @@ async def _run(
             return build(
                 status=FinalStatus.ERROR, failure=exc.kind, error=str(exc), extra=exc.extra
             )
+        metrics.sandbox_wait_s = prov.wait_s
         metrics.sandbox_create_s = prov.create_s
         metrics.seed_s = prov.seed_s
 
