@@ -57,8 +57,8 @@ EPOCHS=3 examples/skyrl/run.sh        # one vLLM engine per GPU, FSDP policy col
 ```
 
 [`run.sh`](../../examples/skyrl/run.sh) runs GRPO on Qwen3-0.6B with 8 tasks ×
-8 samples per step and removes the sandboxes Ray's SIGKILL left behind when it
-ends. SkyRL steps the environments on its env threads
+8 samples per step. Sandboxes die with the workers Ray SIGKILLs at the end, and
+the script prunes after training as a fallback. SkyRL steps the environments on its env threads
 (`environment.skyrl_gym.max_env_workers`); the script gives every trajectory
 of a step its own.
 

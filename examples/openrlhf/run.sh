@@ -42,6 +42,6 @@ python -m openrlhf.cli.train_ppo_ray \
   --logger.logging_steps 1 --ckpt.save_steps -1 --ckpt.output_dir "${CKPT:-checkpoints/openrlhf}" \
   "$@" || status=$?
 
-# Ray SIGKILLs the engine actors at the end: remove the sandboxes they still hold
+# Sandboxes die with the workers Ray SIGKILLs (die_with_owner); this catches older or unbound ones
 python -m agentbox sandbox prune || true
 exit "$status"

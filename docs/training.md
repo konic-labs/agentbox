@@ -137,10 +137,10 @@ own Docker client and warm pool. Three choices decide how that scales:
 - Tasks travel inside the dataset rows by default (`embed_task=True`), so no
   node needs the task files. `$AGENTBOX_TASKS` with task ids only must be
   readable on every node.
-- Ray stops trainer workers with SIGKILL. Run
-  `agentbox sandbox prune --ray-address auto` after training to remove what
-  they left on every node, mostly warm-pool containers. The example launch
-  scripts do this.
+- Ray stops trainer workers with SIGKILL, and their sandboxes die with them
+  (`die_with_owner`). `agentbox sandbox prune --ray-address auto` after
+  training removes older or unbound ones on every node; the example launch
+  scripts run it as a fallback.
 - Export `AGENTBOX_SERVER_TOKEN` before `ray start` on every node rather than
   putting it on a command line.
 

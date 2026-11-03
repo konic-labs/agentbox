@@ -39,6 +39,6 @@ python "$HERE/main_agentbox.py" \
   trainer.logger=console trainer.project_name=agentbox trainer.run_name=skyrl \
   "$@" || status=$?
 
-# Ray SIGKILLs the workers at the end: remove the sandboxes they still hold
+# Sandboxes die with the workers Ray SIGKILLs (die_with_owner); this catches older or unbound ones
 python -m agentbox sandbox prune || true
 exit "$status"
