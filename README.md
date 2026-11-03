@@ -83,7 +83,7 @@ print(traj.final_status, traj.reward, traj.failure_kind, traj.metrics.steps)
 
 The [quick start](docs/quickstart.md) walks through it.
 
-## Train on one GPU
+## Train on one GPU or several
 
 <img src="docs/assets/readme/training.svg" width="100%" alt="Reward while training, in two 30-step GRPO runs of Qwen3-0.6B with verl on one L4 GPU. The 4-step mean of the training reward rises from about 0.57 to 0.86, and validation on 9 held-out tasks from 0.70 to 0.89. Held-out success is 48.6% for the base model and 77.8% after 30 steps; the first run reached 83.3%.">
 
@@ -95,13 +95,21 @@ success on 9 held-out tasks rose from 48.6% to 77.8% and 83.3%, and
 [verl guide](docs/integrations/verl.md) has the settings a small host needs and
 the full numbers.
 
+[`run_grpo_multi_gpu.sh`](examples/verl/run_grpo_multi_gpu.sh) runs the same
+recipe on every GPU of a node or on several nodes. On two RTX PRO 6000 GPUs the
+30 steps took 8.9 minutes, and the training reward followed the single-GPU
+curves. OpenRLHF, SkyRL and TRL have tested launchers too. One cap holds the
+sandboxes of every worker on a node, sandboxes die with the worker that created
+them, and GPU nodes can leave sandboxes to an `agentbox serve` host
+([multi-GPU and multi-node](docs/training.md#multi-gpu-and-multi-node)).
+
 ## Train with your RL framework
 
 <img src="docs/assets/readme/group.svg" width="100%" alt="A GRPO group: one task in four sandboxes. Rewards 1.0, 0.0, 1.0 and 1.0 give advantages +0.58, -1.73, +0.58 and +0.58.">
 
 | Trainer | Entry point | Guide |
 | --- | --- | --- |
-| verl | `agentbox.integrations.verl.AgentBoxAgentLoop` | [verl](docs/integrations/verl.md), with the tested single-GPU recipe |
+| verl | `agentbox.integrations.verl.AgentBoxAgentLoop` | [verl](docs/integrations/verl.md), with tested recipes for one GPU and several |
 | TRL (GRPO) | `agentbox.integrations.trl.make_environment_factory` | [TRL](docs/integrations/trl.md) |
 | OpenRLHF | `agentbox.integrations.openrlhf` (`--agent_func_path`) | [OpenRLHF](docs/integrations/openrlhf.md) |
 | SkyRL | `agentbox.integrations.skyrl.AgentBoxTextEnv` | [SkyRL](docs/integrations/skyrl.md) |
