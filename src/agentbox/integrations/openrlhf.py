@@ -10,7 +10,9 @@ Each prompt's ``label`` selects the task (a task id resolved against
 OpenRLHF's own vLLM engine with its tokenizer, so the returned
 ``observation_tokens``/``action_ranges``/``rollout_log_probs`` are exactly what
 was sampled — no chat-template re-rendering. Settings: ``$AGENTBOX_OPENRLHF_CONFIG``
-(same YAML/JSON layout as the verl integration).
+(same YAML/JSON layout as the verl integration). With a ``remote`` section the
+agent loop still runs here, on the engine, and only the tools and the verifier
+run in an ``agentbox serve`` session (GH #98).
 """
 
 from __future__ import annotations
@@ -20,10 +22,12 @@ import os
 from typing import Any
 
 from agentbox.config import ModelConfig, RolloutConfig
-from agentbox.integrations.verl import Settings, _task_index, load_settings
-from agentbox.runner.rollout import Rollout
+from agentbox.env.remote import RemoteEnv, remote_rollout
+from agentbox.integrations.settings import Settings, load_settings, task_index
+from agentbox.runner.rollout import Rollout, resolve_agent_config
 from agentbox.tasks.schema import Task
 from agentbox.tito import ChatTokenizer, GenOutput, TitoModelClient
+from agentbox.trajectory.schema import Trajectory
 
 PROVISION_ATTEMPTS = 3  # sandbox/seed failures before the first model call are retried
 
@@ -39,7 +43,7 @@ def resolve_task(label: Any) -> Task:
     source = os.environ.get("AGENTBOX_TASKS")
     if not source:
         raise KeyError("label is a task id but $AGENTBOX_TASKS is not set")
-    return _task_index(source)[text]
+    return task_index(source)[text]
 
 
 def _logprob(entry: Any, token_id: int) -> float:
@@ -100,10 +104,17 @@ async def run_episode(
     )
     agent = cfg.agent.model_copy(update={"tool_protocol": "native"})
     config = RolloutConfig(model=ModelConfig(model="tito"), agent=agent, rewards=cfg.rewards)
+    traj: Trajectory
     for _ in range(PROVISION_ATTEMPTS):
-        traj = await Rollout.run(
-            task, model=client, agent=agent, sandbox=cfg.sandbox, config=config
-        )
+        if cfg.remote is not None:
+            env = RemoteEnv.from_config(cfg.remote, rewards=cfg.rewards)
+            traj = await remote_rollout(
+                task, model=client, env=env, agent=resolve_agent_config(agent, None, task)
+            )
+        else:
+            traj = await Rollout.run(
+                task, model=client, agent=agent, sandbox=cfg.sandbox, config=config
+            )
         # retry only infrastructure failures that happened before anything was generated
         if not (traj.failure_kind.is_infra and traj.metrics.model_calls == 0):
             break

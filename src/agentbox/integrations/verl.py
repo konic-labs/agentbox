@@ -16,85 +16,55 @@ Register it in the agent-loop config consumed by verl::
       _target_: agentbox.integrations.verl.AgentBoxAgentLoop
 
 and build the dataset with :func:`tasks_to_verl_rows` / :func:`write_verl_parquet`.
-Sandbox/agent/reward settings come from ``$AGENTBOX_VERL_CONFIG`` (YAML/JSON with
-``sandbox``, ``agent``, ``rewards`` keys) or defaults.
+Sandbox/agent/reward settings come from ``$AGENTBOX_VERL_CONFIG`` (a path, or the
+YAML/JSON text, with ``sandbox``, ``agent``, ``rewards`` and ``remote`` sections)
+or defaults. With ``remote``, sandboxes live on an ``agentbox serve`` host and
+the GPU nodes need no Docker (GH #98).
 """
 
 from __future__ import annotations
 
 import contextvars
-import json
-import os
 from collections.abc import Callable, Iterable
-from functools import lru_cache
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 from agentbox.agent.prompts import render_system_prompt
-from agentbox.config import AgentConfig, SandboxConfig
+from agentbox.config import AgentConfig
 from agentbox.env.env import AgentBoxEnv
-from agentbox.rewards import RewardSpec
+from agentbox.env.remote import RemoteEnv, RemoteEnvError
+from agentbox.integrations.settings import (  # noqa: F401 - re-exported for compatibility
+    Settings,
+    load_settings,
+    task_from_kwargs,
+    tool_text,
+)
+from agentbox.integrations.settings import task_index as _task_index  # noqa: F401
 from agentbox.runner.provision import ProvisionError
 from agentbox.runner.rollout import build_tools
-from agentbox.tasks.loader import iter_tasks
 from agentbox.tasks.schema import Task
+from agentbox.types import FailureKind
 
-_ENV: contextvars.ContextVar[AgentBoxEnv | None] = contextvars.ContextVar(
-    "agentbox_verl_env", default=None
-)
 AGENT_NAME = "agentbox"
 
 
-class Settings:
-    def __init__(
-        self,
-        sandbox: SandboxConfig | None = None,
-        agent: AgentConfig | None = None,
-        rewards: list[RewardSpec] | None = None,
-    ) -> None:
-        self.sandbox = sandbox or SandboxConfig()
-        self.agent = agent or AgentConfig()
-        self.rewards = rewards
+@dataclass
+class _Episode:
+    env: Any
+    error: str | None = None  # the sandbox server failed mid-episode (remote mode)
 
 
-def load_settings(path: str | None = None) -> Settings:
-    path = path or os.environ.get("AGENTBOX_VERL_CONFIG")
-    if not path:
-        return Settings()
-    text = Path(path).read_text(encoding="utf-8")
-    if path.endswith((".yaml", ".yml")):
-        import yaml
-
-        data = yaml.safe_load(text) or {}
-    else:
-        data = json.loads(text)
-    return Settings(
-        sandbox=SandboxConfig.model_validate(data.get("sandbox", {})),
-        agent=AgentConfig.model_validate(data.get("agent", {})),
-        rewards=[RewardSpec.model_validate(r) for r in data["rewards"]]
-        if data.get("rewards")
-        else None,
-    )
+_EPISODE: contextvars.ContextVar[_Episode | None] = contextvars.ContextVar(
+    "agentbox_verl_episode", default=None
+)
 
 
-@lru_cache(maxsize=4)
-def _task_index(source: str) -> dict[str, Task]:
-    return {t.task_id: t for t in iter_tasks(source)}
-
-
-def task_from_kwargs(kwargs: dict[str, Any]) -> Task:
-    extra = kwargs.get("extra_info") or {}
-    blob = extra.get("agentbox_task")
-    if blob:
-        return (
-            Task.model_validate_json(blob) if isinstance(blob, str) else Task.model_validate(blob)
-        )
-    task_id = extra.get("task_id") or kwargs.get("task_id")
-    source = os.environ.get("AGENTBOX_TASKS")
-    if task_id and source:
-        return _task_index(source)[str(task_id)]
-    raise KeyError("dataset row has no extra_info.agentbox_task (or task_id + $AGENTBOX_TASKS)")
+def _new_env(cfg: Settings) -> Any:
+    if cfg.remote is not None:
+        return RemoteEnv.from_config(cfg.remote, agent=cfg.agent, rewards=cfg.rewards)
+    return AgentBoxEnv(sandbox=cfg.sandbox, agent=cfg.agent, rewards=cfg.rewards)
 
 
 class _SchemaView:
@@ -153,30 +123,40 @@ def build_agent_loop_class(
 
         async def run(self, sampling_params: dict[str, Any], **kwargs: Any) -> Any:
             cfg = self._agentbox
-            env = AgentBoxEnv(sandbox=cfg.sandbox, agent=cfg.agent, rewards=cfg.rewards)
+            env = _new_env(cfg)
+            episode = _Episode(env)
             provision_error: ProvisionError | None = None
             try:
                 await env.reset(task_from_kwargs(kwargs))
             except ProvisionError as exc:  # keep the batch alive; the sample is unscorable
                 provision_error = exc
-            token = _ENV.set(env if provision_error is None else None)
+            token = _EPISODE.set(episode if provision_error is None else None)
             try:
                 output = await super().run(sampling_params, **kwargs)
-                if provision_error is None:
-                    result = await env.evaluate()
-                    info: dict[str, Any] = {
-                        "success": result.success,
-                        "status": result.final_status.value,
-                        "failure_kind": result.failure_kind.value,
-                        "reward_breakdown": result.breakdown,
-                    }
-                    reward, infra = result.reward, result.failure_kind.is_infra
-                else:
+                info: dict[str, Any]
+                if provision_error is not None:
                     info = {
                         "failure_kind": provision_error.kind.value,
                         "error": str(provision_error),
                     }
                     reward, infra = 0.0, True
+                elif episode.error is not None:
+                    info = {"failure_kind": FailureKind.SANDBOX.value, "error": episode.error}
+                    reward, infra = 0.0, True
+                else:
+                    try:
+                        result = await env.evaluate()
+                    except RemoteEnvError as exc:
+                        info = {"failure_kind": FailureKind.VERIFIER.value, "error": str(exc)}
+                        reward, infra = 0.0, True
+                    else:
+                        info = {
+                            "success": result.success,
+                            "status": result.final_status.value,
+                            "failure_kind": result.failure_kind.value,
+                            "reward_breakdown": result.breakdown,
+                        }
+                        reward, infra = result.reward, result.failure_kind.is_infra
                 output.reward_score = reward
                 if infra:
                     # verl has no "unscorable" sample: at least never train on its tokens
@@ -187,15 +167,22 @@ def build_agent_loop_class(
                     extra["agentbox"] = info
                 return output
             finally:
-                _ENV.reset(token)
+                _EPISODE.reset(token)
                 await env.close()
 
         async def _call_tool(self, tool_call: Any, tools_kwargs: Any, agent_data: Any) -> Any:
-            env = _ENV.get()
-            if env is None:
+            episode = _EPISODE.get()
+            if episode is None:
                 return make_response("ERROR: no AgentBox environment for this episode"), 0.0, {}
-            outcome = await env.call_tool(tool_call.name, tool_call.arguments)
-            return make_response(outcome.message.content or ""), 0.0, {}
+            if episode.error is None:
+                try:
+                    outcome = await episode.env.call_tool(tool_call.name, tool_call.arguments)
+                except RemoteEnvError as exc:  # the episode becomes an infra failure
+                    episode.error = str(exc)
+                else:
+                    return make_response(tool_text(outcome)), 0.0, {}
+            text = f"ERROR: the sandbox server is unavailable ({episode.error})"
+            return make_response(text), 0.0, {}
 
     # verl registers loops under f"{__module__}.{__qualname__}" and hydra re-imports
     # that path in every agent-loop worker: it must not point inside this function
