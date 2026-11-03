@@ -23,6 +23,13 @@ def serve(
     idle_ttl: Annotated[
         float, typer.Option("--idle-ttl", help="Seconds before idle sessions are reaped")
     ] = 1800.0,
+    allow_client_callables: Annotated[
+        bool,
+        typer.Option(
+            "--allow-client-callables",
+            help="Accept tasks and rewards from clients that name code to import on this host",
+        ),
+    ] = False,
 ) -> None:
     try:
         import uvicorn
@@ -41,7 +48,12 @@ def serve(
         )
     app = create_app(
         settings_from_project(
-            st.project, tasks=tasks, token=token, max_sessions=max_sessions, idle_ttl_s=idle_ttl
+            st.project,
+            tasks=tasks,
+            token=token,
+            max_sessions=max_sessions,
+            idle_ttl_s=idle_ttl,
+            allow_client_callables=allow_client_callables,
         )
     )
     uvicorn.run(app, host=host, port=port, log_level="warning" if st.quiet else "info")

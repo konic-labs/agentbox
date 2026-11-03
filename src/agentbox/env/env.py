@@ -17,6 +17,7 @@ SkyRL, custom); AgentBox owns the sandbox, tools and reward::
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import uuid
@@ -302,6 +303,16 @@ class AgentBoxEnv:
         if self._steps >= self._cfg.max_steps:
             self._finish(StopReason.MAX_STEPS)
 
+    def record_loop(self, *, steps: int | None = None, stop_reason: str | None = None) -> None:
+        """Describe an agent loop that ran elsewhere (a remote client), before evaluating.
+
+        Reward components such as ``step_penalty`` then see the client's turns.
+        """
+        if steps is not None:
+            self._steps = max(self._steps, steps)
+        if stop_reason and self._stop_reason is None:
+            self._stop_reason = stop_reason
+
     def _loop_result(self) -> AgentLoopResult:
         return AgentLoopResult(
             messages=self.messages,
@@ -407,11 +418,20 @@ class AgentBoxEnv:
 
 
 class SyncAgentBoxEnv:
-    """Blocking facade over :class:`AgentBoxEnv` for synchronous trainers."""
+    """Blocking facade over :class:`AgentBoxEnv` for synchronous trainers.
 
-    def __init__(self, *args: Any, loop: BackgroundLoop | None = None, **kwargs: Any) -> None:
+    ``env=`` wraps an existing async env instead, e.g. a :class:`RemoteEnv`.
+    """
+
+    def __init__(
+        self,
+        *args: Any,
+        loop: BackgroundLoop | None = None,
+        env: Any = None,
+        **kwargs: Any,
+    ) -> None:
         self._loop = loop or shared_loop()
-        self.env = AgentBoxEnv(*args, **kwargs)
+        self.env: AgentBoxEnv = env if env is not None else AgentBoxEnv(*args, **kwargs)
 
     def reset(self, task: Task, **kw: Any) -> Observation:
         return self._loop.run(self.env.reset(task, **kw))
@@ -426,7 +446,11 @@ class SyncAgentBoxEnv:
         return self._loop.run(self.env.evaluate())
 
     def trajectory(self, **kw: Any) -> Trajectory:
-        return self.env.trajectory(**kw)
+        out: Any = self.env.trajectory(**kw)
+        if asyncio.iscoroutine(out):  # RemoteEnv.trajectory is a coroutine
+            out = self._loop.run(out)
+        traj: Trajectory = out
+        return traj
 
     def close(self) -> None:
         self._loop.run(self.env.close())
