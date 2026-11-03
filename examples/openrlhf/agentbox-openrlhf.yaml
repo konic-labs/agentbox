@@ -1,0 +1,13 @@
+# AgentBox settings read in OpenRLHF's vLLM engine actors ($AGENTBOX_OPENRLHF_CONFIG)
+sandbox:
+  limits: {cpu_count: 1.0, memory_mb: 512, network_disabled: true}
+  warm_pool: 8                      # pre-started containers per engine actor
+  host_max_sandboxes: 64            # in use at once on a node, across all engines
+agent:
+  tools: [list_files, read_file, write_file, run_tests]
+  max_steps: 6                      # assistant turns per episode
+  episode_timeout_s: 600
+  tool_timeout_s: 60
+  max_tool_output_chars: 4000       # about 1K tokens of pytest output
+rewards:
+  - {name: verifier}

@@ -27,7 +27,7 @@ with open("data/train.jsonl", "w") as fh:
 
 ```bash
 export AGENTBOX_TASKS=$PWD/tasks
-export AGENTBOX_OPENRLHF_CONFIG=$PWD/agentbox-openrlhf.yaml   # sandbox / agent / rewards sections
+export AGENTBOX_OPENRLHF_CONFIG=$PWD/agentbox-openrlhf.yaml   # sandbox / agent / rewards / remote
 python -m openrlhf.cli.train_ppo_ray \
   --train.agent_func_path $(python -c "import agentbox.integrations.openrlhf as m; print(m.__file__)") \
   ...                                                        # your usual OpenRLHF arguments
@@ -35,7 +35,53 @@ python -m openrlhf.cli.train_ppo_ray \
 
 The module provides both forms OpenRLHF has used: an `AgentExecutor` class
 (`AgentExecutorBase` subclass, built lazily) and the `run_episode(...)`
-coroutine behind it.
+coroutine behind it. It accepts the `images` argument OpenRLHF 0.11 passes;
+episodes are text-only.
+
+### On several GPUs
+
+[`examples/openrlhf/run.sh`](../../examples/openrlhf/run.sh) runs GRPO on
+Qwen3-0.6B with one vLLM engine per GPU and the actor colocated with them
+(ZeRO-2, sleep mode), 8 tasks × 8 samples per step:
+
+```bash
+python examples/verl/make_coding_tasks.py data/tasks
+EPISODES=3 examples/openrlhf/run.sh        # 27 tasks x 3 passes = 10 steps
+```
+
+Every engine actor is one AgentBox process with its own warm pool, and
+`sandbox.host_max_sandboxes` in
+[`agentbox-openrlhf.yaml`](../../examples/openrlhf/agentbox-openrlhf.yaml)
+bounds them together. The script removes the sandboxes Ray's SIGKILL left
+behind when training ends, and takes only full rollout batches
+(`--data.max_samples`): OpenRLHF trains on a last, partial batch too, and on two
+ranks that batch hung ZeRO-2's gradient all-reduce until NCCL's 10-minute
+timeout.
+
+Measured with OpenRLHF 0.11.2 on 2× RTX PRO 6000 (96 GB), 10 steps with
+token-level importance-sampling correction
+(`--algo.advantage.is_correction_level token`):
+
+| | |
+| --- | --- |
+| Time per step | 20.3 s (12.1 s generation) |
+| `vllm_kl`: sampled vs recomputed logprobs, both engines | 0.0005–0.0013 per step |
+| Token sequences per episode (`agentbox_sequences`) | 1.0 |
+| Infrastructure failures | 0 |
+| Sandboxes in use, peak | 64, plus up to 9 idle in the engines' warm pools |
+| Containers left after the run | 0 |
+
+The episodes' logprobs match what the actor recomputes, on both engines. The
+reward moved between 0.45 and 0.70 with the task mix of each batch. Ten steps
+check the pipeline, not learning: the verl recipe's reward also rose only
+after its first ten steps.
+
+### Remote sandboxes
+
+With a `remote` section in the settings, AgentBox's agent loop still runs on
+the engine, token-in/token-out, and only the tool calls and the verifier run in
+an `agentbox serve` session (`agentbox.env.remote.remote_rollout`). The GPU
+nodes need no Docker. See [server](../server.md#trainer-adapters).
 
 ## What the episode returns
 
@@ -50,5 +96,5 @@ coroutine behind it.
 
 Infrastructure failures that happen before the first model call (sandbox or
 seeding) are retried up to three times. Later infrastructure failures (a
-verifier crash) are reported through `extra_logs.agentbox_infra_failure`, so
-you can monitor or filter them.
+verifier crash, a lost sandbox server) are reported through
+`extra_logs.agentbox_infra_failure`, so you can monitor or filter them.
