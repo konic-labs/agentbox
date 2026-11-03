@@ -134,7 +134,7 @@ module = [
     "verl", "verl.*", "openrlhf", "openrlhf.*", "skyrl_gym", "skyrl_gym.*",
     "datasets", "datasets.*", "pyarrow", "pyarrow.*", "transformers", "transformers.*",
     "fastapi", "fastapi.*", "uvicorn", "uvicorn.*", "peft", "peft.*", "json_repair",
-    "rich", "rich.*", "yaml", "tomli",
+    "rich", "rich.*", "yaml", "tomli", "ray", "ray.*",
 ]
 ignore_missing_imports = true
 

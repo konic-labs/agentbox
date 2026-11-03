@@ -131,3 +131,43 @@ async def aprune_agentbox_containers(
     **kwargs: Any,
 ) -> list[str]:
     return await asyncio.to_thread(prune_agentbox_containers, docker_client, **kwargs)
+
+
+def _prune_on_this_node(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Run on one Ray node: prune its Docker daemon, judging owners by its own processes."""
+    host = socket.gethostname()
+    try:
+        return {"host": host, "removed": prune_agentbox_containers(**kwargs), "error": None}
+    except Exception as exc:  # e.g. a GPU node without Docker (remote sandboxes)
+        return {"host": host, "removed": [], "error": f"{type(exc).__name__}: {exc}"}
+
+
+def prune_ray_cluster(address: str | None = "auto", **kwargs: Any) -> list[dict[str, Any]]:
+    """Prune AgentBox containers on every alive node of a Ray cluster (GH #98).
+
+    Orphan detection compares the ``host:pid`` owner label with the local process
+    table, so it has to run on each node; one task is pinned to every node.
+    Trainers on Ray (verl, OpenRLHF, SkyRL) stop their workers with SIGKILL, so a
+    launcher calls this after a run to remove what the workers left behind, such
+    as warm-pool containers. ``kwargs`` are those of
+    :func:`prune_agentbox_containers` (scope, run_id, older_than_s, dry_run).
+    """
+    import ray
+    from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
+
+    started = not ray.is_initialized()
+    if started:
+        ray.init(address=address, log_to_driver=False, logging_level=logging.ERROR)
+    try:
+        task = ray.remote(num_cpus=0)(_prune_on_this_node)
+        refs = [
+            task.options(
+                scheduling_strategy=NodeAffinitySchedulingStrategy(node["NodeID"], soft=False)
+            ).remote(kwargs)
+            for node in ray.nodes()
+            if node.get("Alive")
+        ]
+        return list(ray.get(refs))
+    finally:
+        if started:
+            ray.shutdown()
