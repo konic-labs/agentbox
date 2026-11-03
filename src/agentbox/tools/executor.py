@@ -27,6 +27,7 @@ from agentbox.utils.text import truncate_middle
 
 _TIMEOUT_GRACE_S = 5.0
 RECORD_RESULT_CHARS = 2_000  # tool records keep a preview; the message keeps the full text
+SKIPPED_AFTER_SUBMIT = "Skipped: the episode was already submitted."
 
 
 @dataclass(slots=True)
@@ -35,6 +36,41 @@ class ToolOutcome:
     record: ToolCallRecord
     terminal: bool = False
     meta: dict[str, Any] = dataclasses.field(default_factory=dict)
+
+
+def make_outcome(
+    tc: ToolCall,
+    step: int,
+    content: str,
+    *,
+    is_error: bool,
+    args: dict[str, Any] | None,
+    max_output_chars: int,
+    record_result_chars: int = RECORD_RESULT_CHARS,
+    duration_s: float = 0.0,
+    terminal: bool = False,
+    meta: dict[str, Any] | None = None,
+) -> ToolOutcome:
+    """The tool message and record for one call (shared with remote executors)."""
+    shown = truncate_middle(content, max_output_chars)
+    truncated = len(shown) != len(content)
+    message = Message(
+        role=MessageRole.TOOL,
+        content=shown,
+        tool_call_id=tc.id,
+        name=tc.function.name,
+    )
+    record = ToolCallRecord(
+        step=step,
+        tool_call_id=tc.id,
+        name=tc.function.name,
+        arguments=args if args is not None else {"_raw": tc.function.arguments},
+        result=truncate_middle(shown, record_result_chars),
+        is_error=is_error,
+        duration_s=duration_s,
+        truncated=truncated,
+    )
+    return ToolOutcome(message=message, record=record, terminal=terminal, meta=meta or {})
 
 
 def parse_arguments(raw: str | None) -> tuple[dict[str, Any] | None, str | None]:
@@ -87,25 +123,18 @@ class ToolExecutor:
         terminal: bool = False,
         meta: dict[str, Any] | None = None,
     ) -> ToolOutcome:
-        shown = truncate_middle(content, self.max_output_chars)
-        truncated = len(shown) != len(content)
-        message = Message(
-            role=MessageRole.TOOL,
-            content=shown,
-            tool_call_id=tc.id,
-            name=tc.function.name,
-        )
-        record = ToolCallRecord(
-            step=step,
-            tool_call_id=tc.id,
-            name=tc.function.name,
-            arguments=args if args is not None else {"_raw": tc.function.arguments},
-            result=truncate_middle(shown, self.record_result_chars),
+        return make_outcome(
+            tc,
+            step,
+            content,
             is_error=is_error,
+            args=args,
+            max_output_chars=self.max_output_chars,
+            record_result_chars=self.record_result_chars,
             duration_s=duration_s,
-            truncated=truncated,
+            terminal=terminal,
+            meta=meta,
         )
-        return ToolOutcome(message=message, record=record, terminal=terminal, meta=meta or {})
 
     async def run_call(
         self, tc: ToolCall, ctx: ToolContext, *, deadline: float | None = None
@@ -244,13 +273,7 @@ class ToolExecutor:
             if outcomes and outcomes[-1].terminal:
                 for tc in tool_calls[i:]:
                     outcomes.append(
-                        self._outcome(
-                            tc,
-                            ctx.step,
-                            "Skipped: the episode was already submitted.",
-                            is_error=True,
-                            args=None,
-                        )
+                        self._outcome(tc, ctx.step, SKIPPED_AFTER_SUBMIT, is_error=True, args=None)
                     )
                 break
             if parallel and self._is_read_only(tool_calls[i]):

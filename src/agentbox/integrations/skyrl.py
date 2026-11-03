@@ -8,7 +8,9 @@ tool results as user observations::
     register()   # registers "agentbox" with skyrl_gym
 
 Dataset rows carry the task in ``extras["agentbox_task"]`` (JSON) or
-``extras["task_id"]`` with ``$AGENTBOX_TASKS`` set.
+``extras["task_id"]`` with ``$AGENTBOX_TASKS`` set. Settings come from
+``$AGENTBOX_SKYRL_CONFIG``; a ``remote`` section runs the sandboxes on an
+``agentbox serve`` host (GH #98).
 """
 
 from __future__ import annotations
@@ -17,7 +19,8 @@ import os
 from typing import Any
 
 from agentbox.env.env import SyncAgentBoxEnv
-from agentbox.integrations.verl import Settings, load_settings, task_from_kwargs
+from agentbox.env.remote import RemoteEnv, RemoteEnvError
+from agentbox.integrations.settings import Settings, load_settings, task_from_kwargs
 from agentbox.runner.provision import ProvisionError
 from agentbox.tasks.schema import Task
 
@@ -33,7 +36,11 @@ class AgentBoxTextEnvCore:
             update={"tool_protocol": "hermes", "tool_response_role": "user"}
         )
         self.task = task
-        self.env = SyncAgentBoxEnv(sandbox=cfg.sandbox, agent=agent, rewards=cfg.rewards)
+        if cfg.remote is not None:
+            remote = RemoteEnv.from_config(cfg.remote, agent=agent, rewards=cfg.rewards)
+            self.env = SyncAgentBoxEnv(env=remote)
+        else:
+            self.env = SyncAgentBoxEnv(sandbox=cfg.sandbox, agent=agent, rewards=cfg.rewards)
         self.turns = 0
         self.max_turns = agent.max_steps
 
@@ -52,9 +59,19 @@ class AgentBoxTextEnvCore:
 
     def step(self, action: str) -> dict[str, Any]:
         self.turns += 1
-        res = self.env.step(action)
-        if res.done or self.turns >= self.max_turns:
-            result = self.env.evaluate()
+        try:
+            res = self.env.step(action)
+            done = res.done or self.turns >= self.max_turns
+            result = self.env.evaluate() if done else None
+        except RemoteEnvError as exc:  # the sandbox server failed: end the episode
+            self.env.close()
+            return {
+                "observations": [],
+                "reward": 0.0,
+                "done": True,
+                "metadata": {"infra_failure": True, "error": str(exc)},
+            }
+        if result is not None:
             self.env.close()
             return {
                 "observations": [],
@@ -64,6 +81,7 @@ class AgentBoxTextEnvCore:
                     "success": result.success,
                     "status": result.final_status.value,
                     "reward_breakdown": result.breakdown,
+                    "infra_failure": result.failure_kind.is_infra,
                 },
             }
         return {"observations": res.messages, "reward": 0.0, "done": False, "metadata": {}}

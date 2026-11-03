@@ -161,6 +161,40 @@ class SandboxConfig(BaseModel):
     )
 
 
+class RemoteConfig(BaseModel):
+    """Sandboxes hosted by ``agentbox serve`` on another machine (trainer adapters)."""
+
+    url: str = Field(description="Base URL of an `agentbox serve` endpoint, e.g. http://cpu1:8765.")
+    token_env: str = Field(
+        default="AGENTBOX_SERVER_TOKEN", description="Environment variable holding the token."
+    )
+    timeout_s: float = Field(
+        default=600.0,
+        gt=0,
+        description="Per-request timeout; tool calls and the verifier run inside requests.",
+    )
+    max_retries: int = Field(
+        default=5,
+        ge=0,
+        description=(
+            "Retries for provisioning failures (503) and unreachable servers. A tool call "
+            "is retried only when the request never reached the server."
+        ),
+    )
+    session_wait_s: float = Field(
+        default=1800.0,
+        gt=0,
+        description="How long to keep retrying while the server is at --max-sessions (429).",
+    )
+    retry_backoff_s: float = Field(
+        default=0.5, gt=0, description="Exponential backoff base (full jitter)."
+    )
+    retry_max_backoff_s: float = Field(default=10.0, gt=0, description="Cap on one backoff.")
+    max_connections: int = Field(
+        default=512, ge=1, description="HTTP connections per process (and event loop)."
+    )
+
+
 class ModelConfig(BaseModel):
     """OpenAI Chat Completions client config (any compatible server)."""
 
