@@ -54,3 +54,54 @@ def test_forked_child_gets_its_own_shared_backend(monkeypatch: pytest.MonkeyPatc
     assert got is made[0] and got is not inherited
     assert backend_mod.get_backend() is got  # cached for this process
     assert len(made) == 1
+
+
+def test_cluster_prune_runs_once_on_every_alive_node(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Orphans are judged on each node against its own processes: one pinned task per node."""
+    import sys
+    import types
+
+    from agentbox.sandbox import prune as prune_mod
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    class Strategy:
+        def __init__(self, node_id: str, soft: bool) -> None:
+            assert soft is False
+            self.node_id = node_id
+
+    class Task:
+        def __init__(self, fn: Any) -> None:
+            self.fn, self.node = fn, ""
+
+        def options(self, scheduling_strategy: Strategy) -> Task:
+            self.node = scheduling_strategy.node_id
+            return self
+
+        def remote(self, kwargs: dict[str, Any]) -> Any:
+            calls.append((self.node, kwargs))
+            if self.node == "gpu-only":  # a node without Docker reports, it does not fail
+                return {"host": self.node, "removed": [], "error": "DockerNotAvailableError: no"}
+            return {"host": self.node, "removed": ["c1"], "error": None}
+
+    ray = types.SimpleNamespace(
+        is_initialized=lambda: False,
+        init=lambda **kw: None,
+        shutdown=lambda: None,
+        nodes=lambda: [
+            {"NodeID": "head", "Alive": True},
+            {"NodeID": "gpu-only", "Alive": True},
+            {"NodeID": "gone", "Alive": False},
+        ],
+        remote=lambda **kw: Task,
+        get=lambda refs: refs,
+    )
+    strategies = types.ModuleType("ray.util.scheduling_strategies")
+    strategies.NodeAffinitySchedulingStrategy = Strategy  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "ray", ray)
+    monkeypatch.setitem(sys.modules, "ray.util", types.ModuleType("ray.util"))
+    monkeypatch.setitem(sys.modules, "ray.util.scheduling_strategies", strategies)
+    out = prune_mod.prune_ray_cluster("auto", scope="orphans", dry_run=True)
+    assert [c[0] for c in calls] == ["head", "gpu-only"]
+    assert calls[0][1] == {"scope": "orphans", "dry_run": True}
+    assert out[0]["removed"] == ["c1"] and out[1]["error"].startswith("DockerNotAvailable")

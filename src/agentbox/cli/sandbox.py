@@ -8,7 +8,7 @@ import shutil
 import time
 import uuid
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -182,17 +182,39 @@ def sandbox_prune(
     run_id: Annotated[str | None, typer.Option("--run-id")] = None,
     older_than: Annotated[str | None, typer.Option("--older-than", help="e.g. 2h")] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+    ray_address: Annotated[
+        str | None,
+        typer.Option(
+            "--ray-address",
+            help="Prune on every node of this Ray cluster (e.g. auto), not only here",
+        ),
+    ] = None,
 ) -> None:
     """Remove orphaned sandboxes (owner process gone), or all / by run / by age."""
-    from agentbox.sandbox.prune import prune_agentbox_containers
+    from agentbox.sandbox.prune import prune_agentbox_containers, prune_ray_cluster
 
-    removed = prune_agentbox_containers(
-        scope="all" if all_ else "orphans",
-        run_id=run_id,
-        older_than_s=_parse_age(older_than),
-        dry_run=dry_run,
-    )
+    kwargs: dict[str, Any] = {
+        "scope": "all" if all_ else "orphans",
+        "run_id": run_id,
+        "older_than_s": _parse_age(older_than),
+        "dry_run": dry_run,
+    }
     verb = "would remove" if dry_run else "removed"
+    if ray_address:
+        nodes = prune_ray_cluster(ray_address, **kwargs)
+        emit(
+            state(ctx),
+            {"nodes": nodes, "dry_run": dry_run},
+            lambda: [
+                typer.echo(
+                    f"{n['host']}: {verb} {len(n['removed'])} container(s)"
+                    + (f" ({n['error']})" if n["error"] else "")
+                )
+                for n in nodes
+            ],
+        )
+        return
+    removed = prune_agentbox_containers(**kwargs)
     emit(
         state(ctx),
         {"removed": removed, "dry_run": dry_run},
