@@ -61,6 +61,51 @@ def owner_label() -> str:
     return f"{socket.gethostname()}:{os.getpid()}"
 
 
+# Main process of a sandbox that dies with its owner (GH #111). It starts the configured
+# command in the background and reads stdin, which the owning process holds open through
+# an attach stream. When the owner dies, however it dies, the daemon closes stdin
+# (StdinOnce): the loop ends, the container exits, and AutoRemove deletes it. A "keep"
+# line hands the container over to the configured command, so kept sandboxes stay.
+_OWNER_WATCH = (
+    '"$@" & m=$!; '
+    'while IFS= read -r l; do [ "$l" = keep ] && { wait "$m"; exit; }; done; '
+    'kill "$m" 2>/dev/null; exit 0'
+)
+
+
+def owner_bound_command(command: list[str]) -> list[str]:
+    """``command`` wrapped so the container ends when its owner's attach stream does."""
+    return ["/bin/sh", "-c", _OWNER_WATCH, "agentbox-owner-watch", *command]
+
+
+class _Lease:
+    """The attach stream that ties a container's lifetime to this process (GH #111)."""
+
+    __slots__ = ("response", "sock")
+
+    def __init__(self, response: Any, sock: Any = None) -> None:
+        self.response = response  # held: collecting it could close the stream
+        self.sock = sock
+
+    def _raw(self) -> Any:
+        return getattr(self.sock, "_sock", self.sock)  # unix: a read-only SocketIO wrapper
+
+    def send(self, data: bytes) -> None:
+        self._raw().sendall(data)
+
+    def fileno(self) -> int:
+        raw = self._raw()
+        return raw.fileno() if isinstance(raw, socket.socket) else -1
+
+    def close(self) -> None:
+        for part in (self.response, self.sock):
+            if part is not None:
+                try:
+                    part.close()
+                except Exception:  # pragma: no cover - best effort
+                    pass
+
+
 # Go os.FileMode bits reported by the archive stat header.
 _GO_MODE_DIR = 1 << 31
 _GO_MODE_SYMLINK = 1 << 27
@@ -222,6 +267,7 @@ class ContainerSpec:
     init: bool = True
     user: str | None = None
     runtime: str | None = None
+    die_with_owner: bool = False  # removed when the creating process dies (GH #111)
 
 
 @dataclass(slots=True)
@@ -335,6 +381,7 @@ class DockerBackend:
         self._locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
         self._live: set[str] = set()
+        self._leases: dict[str, _Lease] = {}  # guarded by _live_guard
         self._live_guard = threading.Lock()
         self._cache_used: dict[str, float] = {}
         self.closed = False
@@ -630,18 +677,25 @@ class DockerBackend:
             host_kwargs["security_opt"] = ["no-new-privileges:true"]
         if spec.runtime:
             host_kwargs["runtime"] = spec.runtime
+        command = list(spec.command)
+        if spec.die_with_owner:
+            host_kwargs["auto_remove"] = True
+            command = owner_bound_command(command)
         try:
             host_config = api.create_host_config(**host_kwargs)
             resp = api.create_container(
                 image=spec.image,
-                command=spec.command,
+                command=command,
                 name=spec.name,
                 working_dir=spec.working_dir,
                 environment=spec.env or None,
                 labels=spec.labels,
                 host_config=host_config,
                 user=spec.user or "",
-                detach=True,
+                # bound: an open stdin that the daemon closes when its one attached
+                # client goes away (docker-py sets StdinOnce for non-detached creates)
+                detach=not spec.die_with_owner,
+                stdin_open=spec.die_with_owner,
                 hostname="sandbox",
             )
             cid = str(resp["Id"])
@@ -650,11 +704,41 @@ class DockerBackend:
         with self._live_guard:
             self._live.add(cid)
         try:
+            if spec.die_with_owner:
+                self._attach_lease(cid)  # before start, so it never runs unowned
             api.start(cid)
-        except APIError as exc:
+        except Exception as exc:
             self.remove_container_sync(cid)
             raise SandboxError(f"Failed to start container: {exc}") from exc
         return cid
+
+    def _attach_lease(self, cid: str) -> None:
+        """Hold ``cid``'s stdin open: the daemon closes it when this process dies."""
+        api = self.client.api
+        response = api.post(
+            api._url("/containers/{0}/attach", cid),
+            None,
+            params={"stdin": 1, "stream": 1},
+            stream=True,
+            headers={"Connection": "Upgrade", "Upgrade": "tcp"},
+        )
+        lease = _Lease(response)
+        try:
+            lease.sock = api._get_raw_response_socket(response)  # raises on HTTP errors
+        except BaseException:
+            lease.close()
+            raise
+        with self._live_guard:
+            self._leases[cid] = lease
+
+    def _pop_lease(self, cid: str) -> _Lease | None:
+        with self._live_guard:
+            return self._leases.pop(cid, None)
+
+    def leased_containers(self) -> list[str]:
+        """Containers that end when this process does (``die_with_owner``)."""
+        with self._live_guard:
+            return list(self._leases)
 
     async def create_container(self, spec: ContainerSpec) -> str:
         cid = await self.run_ctl_owned(self.create_container_sync, spec)
@@ -675,21 +759,36 @@ class DockerBackend:
         finally:
             with self._live_guard:
                 self._live.discard(cid)
+                lease = self._leases.pop(cid, None)
+            if lease is not None:  # a failed removal still ends a bound container
+                lease.close()
 
     async def remove_container(self, cid: str) -> None:
         await self.run_ctl(self.remove_container_sync, cid)
 
     def forget_container(self, cid: str) -> None:
-        """Stop tracking ``cid`` so exit cleanup leaves it running (kept sandboxes)."""
+        """Stop tracking ``cid``: exit cleanup leaves it, and its lease is released."""
         with self._live_guard:
             self._live.discard(cid)
+            lease = self._leases.pop(cid, None)
+        if lease is not None:
+            lease.close()
 
     def keep_container_sync(self, cid: str, name: str) -> str:
         """Leave ``cid`` running after this process exits; returns its new name.
 
-        Kept containers are renamed ``<name>-kept`` so orphan reaping and
-        orphan pruning skip them.
+        A container bound to this process is told to stay first ("keep" on its
+        stdin). Kept containers are renamed ``<name>-kept`` so orphan reaping
+        and orphan pruning skip them.
         """
+        lease = self._pop_lease(cid)
+        if lease is not None:
+            try:
+                lease.send(b"keep\n")
+            except OSError as exc:
+                logger.warning("%s may not outlive this process: %s", cid[:12], exc)
+            finally:
+                lease.close()
         self.forget_container(cid)
         new = name if name.endswith("-kept") else f"{name[:58]}-kept"
         try:
@@ -955,6 +1054,10 @@ class DockerBackend:
         try:
             self.cleanup_live_sync()
         finally:
+            with self._live_guard:
+                leases, self._leases = list(self._leases.values()), {}
+            for lease in leases:
+                lease.close()
             self._io.shutdown(wait=False, cancel_futures=True)
             self._ctl.shutdown(wait=False, cancel_futures=True)
             if not self._external_client:
@@ -977,6 +1080,32 @@ _BACKENDS: weakref.WeakSet[DockerBackend] = weakref.WeakSet()
 _default_backend: DockerBackend | None = None
 _default_lock = threading.Lock()
 _reaped = False
+
+
+def _release_inherited_leases() -> None:
+    """In a forked child: let go of the parent's attach streams.
+
+    Otherwise a long-lived child would keep its parent's sandboxes alive after
+    the parent died. /dev/null is duplicated over each stream's descriptor
+    instead of closing it: no lock is taken (one may be held by a thread that
+    did not survive the fork), and the number stays valid for the objects that
+    still own it.
+    """
+    devnull = os.open(os.devnull, os.O_RDWR)
+    try:
+        for backend in list(_BACKENDS):
+            for lease in list(backend._leases.values()):
+                fd = lease.fileno()
+                if fd >= 0:
+                    os.dup2(devnull, fd)
+    except Exception:  # pragma: no cover - never break a fork
+        pass
+    finally:
+        os.close(devnull)
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_release_inherited_leases)
 
 
 def get_backend() -> DockerBackend:

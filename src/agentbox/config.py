@@ -145,6 +145,14 @@ class SandboxConfig(BaseModel):
     warm_pool_ttl_s: float = Field(
         default=300.0, gt=0, description="Idle pooled containers are removed after this long."
     )
+    die_with_owner: bool = Field(
+        default=True,
+        description=(
+            "The Docker daemon removes a sandbox when the process that created it dies, "
+            "however it dies (SIGKILL included). Needs /bin/sh in the image; kept "
+            "sandboxes stay. False: only orphan reaping and `sandbox prune` remove them."
+        ),
+    )
     host_max_sandboxes: int | None = Field(
         default=None,
         ge=1,

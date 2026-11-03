@@ -129,6 +129,7 @@ class SandboxManager:
             init=sec.init,
             user=sec.user,
             runtime=sec.runtime,
+            die_with_owner=cfg.die_with_owner,
         )
 
     async def create(
